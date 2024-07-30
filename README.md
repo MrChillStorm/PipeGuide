@@ -51,27 +51,33 @@ python3 pipeguide.py [input_file] [options]
 - `-f`, `--filter-order`: Order of the Bessel filter used for smoothing (default: 6).
 - `-c`, `--filter-cutoff`: Cutoff frequency for the Bessel filter (default: 0.12).
 - `-o`, `--output-file`: Path for the output XML file (default: `yasim.xml`).
-- `-w`, `--width-axis`: Axis to use for width calculation (`y`, or `z`, default: `z`).
+- `-w`, `--width-axis`: Axis to use for width calculation (`y` or `z`, default: `z`).
 - `-t`, `--triple-mode`: Process and refine upper, middle, and lower sections separately for better shape adherence.
+
+### Clarification on Options
+
+The `-w` and `-t` options can significantly alter the way the fuselage is processed:
+
+- **Width Axis (`-w`)**: This option specifies which axis (`y` or `z`) is used to calculate the width of the fuselage sections. Choosing the correct axis is essential for accurate sectioning and shaping. 
+  - When `-w y` is selected, the upper and lower sections become left and right sections, allowing better modeling of fuselages that are wider than they are tall.
+
+- **Triple Mode (`-t`)**: When enabled, this mode processes and refines the upper, middle, and lower sections of the fuselage separately. This allows for better adherence to complex shapes but may change the splitting logic depending on the `-w` option.
+  - In `-w y` mode, the triple mode will process left, middle, and right sections separately.
 
 ### Example
 
 ```bash
-python3 pipeguide.py fuselage_model.obj -o refined_fuselage.xml -t
+python3 pipeguide.py fuselage_model.obj -o refined_fuselage.xml -t -w y
 ```
 
 ## Technical Insights
 
 **PipeGuide** uses several advanced techniques to process and refine cylindrical fuselage models:
 
-1. **Model Importation and Sectioning**: Load your 3D fuselage model and divide it into upper, middle, and lower sections. This separation allows for a more accurate representation of complex fuselage shapes by handling each part individually.
-
+1. **Model Importation and Sectioning**: Load your 3D fuselage model and divide it into upper, middle, and lower sections. This separation allows for a more accurate representation of complex fuselage shapes by handling each part individually. When `-w y` is selected, the sections are divided into left, middle, and right.
 2. **Sectional Analysis and Tapering**: Analyze and adjust each section to align with the aircraft’s real-world dimensions. The tool refines the cylindrical segments to closely match the original fuselage profile.
-
 3. **Centroid and Width Calculation**: Calculate the centroid and width for each section to guide the tapering and alignment process.
-
 4. **Bessel Smoothing**: Apply Bessel filters to smooth the contours of the fuselage, enhancing aerodynamic accuracy and overall realism.
-
 5. **XML Generation**: Produce an XML file with the refined fuselage data. This file contains only the fuselage sections, which developers can integrate into an existing flight model file.
 
 ## Coordinate System and Model Preparation
