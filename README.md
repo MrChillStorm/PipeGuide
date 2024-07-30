@@ -51,7 +51,7 @@ python3 pipeguide.py [input_file] [options]
 - `-f`, `--filter-order`: Order of the Bessel filter used for smoothing (default: 6).
 - `-c`, `--filter-cutoff`: Cutoff frequency for the Bessel filter (default: 0.12).
 - `-o`, `--output-file`: Path for the output XML file (default: `yasim.xml`).
-- `-w`, `--width-axis`: Axis to use for width calculation (`x`, `y`, or `z`, default: `z`).
+- `-w`, `--width-axis`: Axis to use for width calculation (`y`, or `z`, default: `z`).
 - `-t`, `--triple-mode`: Process and refine upper, middle, and lower sections separately for better shape adherence.
 
 ### Example
