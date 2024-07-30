@@ -50,12 +50,33 @@ def split_section_by_z(section):
     split_value_middle_upper = min(split_value_middle_upper, zmax)
 
     # Clip sections
-    mesh_upper = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], section.bounds[2], section.bounds[3], split_value_upper, section.bounds[5]), invert=False)
-    mesh_middle = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], section.bounds[2], section.bounds[3], split_value_middle_lower, split_value_middle_upper), invert=False)
-    mesh_lower = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], section.bounds[2], section.bounds[3], zmin, split_value_upper), invert=False)
+    mesh_upper = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            section.bounds[2],
+            section.bounds[3],
+            split_value_upper,
+            section.bounds[5]),
+        invert=False)
+    mesh_middle = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            section.bounds[2],
+            section.bounds[3],
+            split_value_middle_lower,
+            split_value_middle_upper),
+        invert=False)
+    mesh_lower = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            section.bounds[2],
+            section.bounds[3],
+            zmin,
+            split_value_upper),
+        invert=False)
 
     return mesh_upper, mesh_middle, mesh_lower
 
@@ -80,12 +101,33 @@ def split_section_by_y(section):
     split_value_middle_right = min(split_value_middle_right, ymax)
 
     # Clip sections
-    mesh_left = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], ymin, split_value_left, section.bounds[4], section.bounds[5]), invert=False)
-    mesh_middle = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], split_value_middle_left, split_value_middle_right, section.bounds[4], section.bounds[5]), invert=False)
-    mesh_right = section.clip_box(bounds=(
-        section.bounds[0], section.bounds[1], split_value_left, ymax, section.bounds[4], section.bounds[5]), invert=False)
+    mesh_left = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            ymin,
+            split_value_left,
+            section.bounds[4],
+            section.bounds[5]),
+        invert=False)
+    mesh_middle = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            split_value_middle_left,
+            split_value_middle_right,
+            section.bounds[4],
+            section.bounds[5]),
+        invert=False)
+    mesh_right = section.clip_box(
+        bounds=(
+            section.bounds[0],
+            section.bounds[1],
+            split_value_left,
+            ymax,
+            section.bounds[4],
+            section.bounds[5]),
+        invert=False)
 
     return mesh_left, mesh_middle, mesh_right
 
@@ -246,7 +288,14 @@ def align_and_merge(upper_info, middle_info, lower_info):
     return sections_info
 
 
-def main(file_path, output_file, num_sections=83, order=6, cutoff=0.12, width_axis='z', triple_mode=False):
+def main(
+        file_path,
+        output_file,
+        num_sections=83,
+        order=6,
+        cutoff=0.12,
+        width_axis='z',
+        triple_mode=False):
     try:
         mesh = load_fuselage_model(file_path)
     except FileNotFoundError:
@@ -300,7 +349,9 @@ def main(file_path, output_file, num_sections=83, order=6, cutoff=0.12, width_ax
             for i in range(len(sections) - 1):
                 ax, ay, az = smoothed_centroids_x[i], smoothed_centroids_y[i], smoothed_centroids_z[i]
                 bx, by, bz = smoothed_centroids_x[i +
-                                                  1], smoothed_centroids_y[i + 1], smoothed_centroids_z[i + 1]
+                                                  1], smoothed_centroids_y[i +
+                                                                           1], smoothed_centroids_z[i +
+                                                                                                    1]
                 width_start = smoothed_widths[i]
                 width_end = smoothed_widths[i + 1]
 
@@ -334,12 +385,28 @@ if __name__ == "__main__":
                         default=0.12, help="Filter cutoff (default: 0.12)")
     parser.add_argument("-o", "--output-file", default="yasim.xml",
                         help="Output XML file (default: yasim.xml)")
-    parser.add_argument("-w", "--width-axis", choices=[
-                        'x', 'y', 'z'], default='z', help="Axis to use for width calculation (default: z)")
-    parser.add_argument("-t", "--triple-mode", action="store_true",
-                        help="Process upper, middle, and lower halves separately")
+    parser.add_argument(
+        "-w",
+        "--width-axis",
+        choices=[
+            'x',
+            'y',
+            'z'],
+        default='z',
+        help="Axis to use for width calculation (default: z)")
+    parser.add_argument(
+        "-t",
+        "--triple-mode",
+        action="store_true",
+        help="Process upper, middle, and lower halves separately")
 
     args = parser.parse_args()
 
-    main(args.input_file, args.output_file, num_sections=args.sections, order=args.filter_order,
-         cutoff=args.filter_cutoff, width_axis=args.width_axis, triple_mode=args.triple_mode)
+    main(
+        args.input_file,
+        args.output_file,
+        num_sections=args.sections,
+        order=args.filter_order,
+        cutoff=args.filter_cutoff,
+        width_axis=args.width_axis,
+        triple_mode=args.triple_mode)
