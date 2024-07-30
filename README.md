@@ -84,36 +84,51 @@ For **PipeGuide** to process your fuselage model accurately, the input model mus
 - **y**: + left / - right
 - **z**: + up / - down
 
-Ensure that your model is oriented according to this coordinate system before using **PipeGuide**. If your model does not conform to this coordinate system, the results may not be as expected.
+Ensure your model is oriented according to this coordinate system before using **PipeGuide**. Misaligned models may produce unexpected results.
 
 ### Preparing Your Model
 
-If your model is not in the FlightGear coordinate system, you may need to adjust its orientation. Here are some general steps to prepare your model:
+To achieve the best results with **PipeGuide**, follow these steps to prepare your 3D fuselage model:
 
-1. **Use a 3D Modeling Software**: Open your model in a 3D modeling software that supports coordinate system adjustments, such as Blender, Autodesk Maya, or 3ds Max.
+1. **Clean Your Model**:
+   - Remove all unnecessary components such as wings, stabilizers, landing gear, and other external parts.
+   - Ensure only the clean fuselage remains for accurate processing.
+
+   ![Cleaned Model Example](cleaned_model_screenshot.png)
+   
+   *Figure 2: Example of a cleaned fuselage model, ready for processing.*
 
 2. **Align the Coordinate System**:
-   - **Blender**: You can rotate your model to match the FlightGear coordinate system by using the `Transform` options. Rotate the model so that:
-     - The positive x-axis points forwards.
-     - The positive y-axis points left.
-     - The positive z-axis points up.
-   - **Autodesk Maya** or **3ds Max**: Adjust the model's orientation using the `Rotate` tool to align the axes accordingly.
+   - If your model does not already conform to the FlightGear coordinate system, adjust its orientation using 3D modeling software such as Blender, Autodesk Maya, or 3ds Max.
+   
+   **In Blender**:
+   - Open your model in Blender.
+   - Use the `Transform` options to rotate and align the model:
+     - The positive x-axis should point forwards.
+     - The positive y-axis should point left.
+     - The positive z-axis should point up.
 
-3. **Check Model Orientation**: Ensure that the model's bounding box aligns with the FlightGear coordinate system. This can often be visualized in the modeling software's viewport.
+   **In Autodesk Maya or 3ds Max**:
+   - Open your model in the software.
+   - Use the `Rotate` tool to align the axes as specified above.
 
-4. **Export in Supported Format**: Save or export the model in a format supported by **pyvista**. **PipeGuide** currently supports the following formats:
-   - **OBJ** (.obj)
-   - **STL** (.stl)
-   - **PLY** (.ply)
+3. **Check Model Orientation**:
+   - Ensure that the model's bounding box aligns with the FlightGear coordinate system. This alignment can often be visualized in the modeling software's viewport.
 
-   Make sure the exported model file adheres to the correct coordinate system and is in a compatible format.
+4. **Export in Supported Format**:
+   - Save or export the model in a format supported by **PyVista**. **PipeGuide** supports the following formats:
+     - **OBJ** (.obj)
+     - **STL** (.stl)
+     - **PLY** (.ply)
+
+   Make sure the exported model adheres to the correct coordinate system and is in a compatible format.
 
 ### Additional Notes
 
-- **Scaling**: Ensure that the scale of the model is consistent with your flight model requirements. The tool does not perform scaling adjustments.
+- **Scaling**: Ensure the scale of the model is consistent with your flight model requirements. The tool does not perform scaling adjustments.
 - **Model Integrity**: Verify that your model is a closed mesh with no errors or inconsistencies, as these can affect the sectioning and analysis process.
 
-By following these guidelines, you can ensure that your fuselage model is correctly prepared and aligned for accurate processing by **PipeGuide**.
+By following these guidelines, you can ensure your fuselage model is correctly prepared and aligned for accurate processing by **PipeGuide**.
 
 ## Contributing
 
