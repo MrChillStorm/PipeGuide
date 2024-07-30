@@ -67,8 +67,6 @@ python3 pipeguide.py fuselage_model.obj -o refined_fuselage.xml -t
 
 5. **XML Generation**: Produce an XML file with the refined fuselage data. This file contains only the fuselage sections, which developers can integrate into an existing flight model file.
 
-Certainly! Here’s a separate section for your README.md addressing the coordinate system requirements and model preparation instructions:
-
 ## Coordinate System and Model Preparation
 
 ### Coordinate System
