@@ -14,7 +14,7 @@ def load_fuselage_model(file_path):
     return mesh
 
 
-def extract_fuselage_sections(mesh, num_sections=83):
+def extract_fuselage_sections(mesh, num_sections):
     xmin, xmax, ymin, ymax, zmin, zmax = mesh.bounds
     x_range = np.linspace(xmin, xmax, num_sections + 1)
     sections = []
@@ -40,16 +40,13 @@ def split_section_by_z(section):
     center_z = centroid[2]
     total_height = zmax - zmin
 
-    # Define the split values
     split_value_upper = center_z
     split_value_middle_lower = center_z - (total_height * 0.25)
     split_value_middle_upper = center_z + (total_height * 0.25)
 
-    # Ensure split values are within bounds
     split_value_middle_lower = max(split_value_middle_lower, zmin)
     split_value_middle_upper = min(split_value_middle_upper, zmax)
 
-    # Clip sections
     mesh_upper = section.clip_box(
         bounds=(
             section.bounds[0],
@@ -91,16 +88,13 @@ def split_section_by_y(section):
     center_y = centroid[1]
     total_width = ymax - ymin
 
-    # Define the split values
     split_value_left = center_y
     split_value_middle_left = center_y - (total_width * 0.25)
     split_value_middle_right = center_y + (total_width * 0.25)
 
-    # Ensure split values are within bounds
     split_value_middle_left = max(split_value_middle_left, ymin)
     split_value_middle_right = min(split_value_middle_right, ymax)
 
-    # Clip sections
     mesh_left = section.clip_box(
         bounds=(
             section.bounds[0],
@@ -132,7 +126,7 @@ def split_section_by_y(section):
     return mesh_left, mesh_middle, mesh_right
 
 
-def compute_centroid_and_width(section, width_axis='z'):
+def compute_centroid_and_width(section, width_axis):
     centroid = section.center
     points = section.points
     if points.size == 0:
@@ -143,12 +137,11 @@ def compute_centroid_and_width(section, width_axis='z'):
     width_max = points[:, axis_index].max()
     width = width_max - width_min
 
-    # Reverse x and y coordinates as per the system
     centroid = (-centroid[0], -centroid[1], centroid[2])
     return centroid, width
 
 
-def apply_bessel_filter(values, order=6, cutoff=0.12):
+def apply_bessel_filter(values, order, cutoff):
     b, a = bessel(order, cutoff, btype='low', analog=False)
     return filtfilt(b, a, values)
 
@@ -175,6 +168,12 @@ def write_to_xml(sections_info, output_file):
     tree = ET.ElementTree(root)
     tree.write(output_file, xml_declaration=True,
                encoding='utf-8', method="xml")
+
+    num_elements = len(root)
+    print(f"XML written with {num_elements} sections.")
+    if num_elements < expected_num_sections:
+        print(f"Warning: Fewer sections ({
+              num_elements}) in XML than expected ({expected_num_sections}).")
 
 
 def process_half(sections, width_axis, order, cutoff, part):
@@ -217,6 +216,12 @@ def process_half(sections, width_axis, order, cutoff, part):
         except ValueError as e:
             print(f"Error processing section: {e}")
 
+    if len(centroids) != len(sections):
+        print(
+            f"Warning: Number of processed centroids ({
+                len(centroids)}) does not match number of sections ({
+                len(sections)})")
+
     smoothed_centroids_x = apply_bessel_filter(
         [c[0] for c in centroids], order, cutoff)
     smoothed_centroids_y = apply_bessel_filter(
@@ -234,7 +239,9 @@ def align_and_merge(upper_info, middle_info, lower_info):
     lower_x, lower_y, lower_z, lower_widths = lower_info
 
     sections_info = []
-    for i in range(len(upper_x) - 1):
+
+    # Process upper sections
+    for i in range(len(upper_x)):
         ax = upper_x[i]
         ay = upper_y[i]
         az = upper_z[i]
@@ -251,7 +258,8 @@ def align_and_merge(upper_info, middle_info, lower_info):
 
         sections_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
 
-    for i in range(len(middle_x) - 1):
+    # Process middle sections
+    for i in range(len(middle_x)):
         ax = middle_x[i]
         ay = middle_y[i]
         az = middle_z[i]
@@ -268,7 +276,8 @@ def align_and_merge(upper_info, middle_info, lower_info):
 
         sections_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
 
-    for i in range(len(lower_x) - 1):
+    # Process lower sections
+    for i in range(len(lower_x)):
         ax = lower_x[i]
         ay = lower_y[i]
         az = lower_z[i]
@@ -291,11 +300,14 @@ def align_and_merge(upper_info, middle_info, lower_info):
 def main(
         file_path,
         output_file,
-        num_sections=83,
-        order=6,
-        cutoff=0.12,
-        width_axis='z',
-        triple_mode=False):
+        num_sections,
+        order,
+        cutoff,
+        width_axis,
+        triple_mode):
+    global expected_num_sections
+    expected_num_sections = num_sections
+
     try:
         mesh = load_fuselage_model(file_path)
     except FileNotFoundError:
@@ -346,22 +358,24 @@ def main(
             smoothed_widths = apply_bessel_filter(widths, order, cutoff)
 
             sections_info = []
-            for i in range(len(sections) - 1):
+            for i in range(len(sections)):
                 ax, ay, az = smoothed_centroids_x[i], smoothed_centroids_y[i], smoothed_centroids_z[i]
-                bx, by, bz = smoothed_centroids_x[i +
-                                                  1], smoothed_centroids_y[i +
-                                                                           1], smoothed_centroids_z[i +
-                                                                                                    1]
+                bx, by, bz = smoothed_centroids_x[i + 1] if i + 1 < len(smoothed_centroids_x) else ax, \
+                    smoothed_centroids_y[i + 1] if i + 1 < len(smoothed_centroids_y) else ay, \
+                    smoothed_centroids_z[i + 1] if i + \
+                    1 < len(smoothed_centroids_z) else az
                 width_start = smoothed_widths[i]
-                width_end = smoothed_widths[i + 1]
+                width_end = smoothed_widths[i + 1] if i + \
+                    1 < len(smoothed_widths) else width_start
 
                 taper = min(width_start, width_end) / \
                     max(width_start, width_end)
                 midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
-
                 width = max(width_start, width_end)
+
                 sections_info.append(
                     (ax, ay, az, bx, by, bz, width, taper, midpoint))
+
     except Exception as e:
         print(f"An error occurred during processing: {e}")
         return
