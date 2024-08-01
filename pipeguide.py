@@ -44,7 +44,7 @@ def split_section_by_z(section):
     distance_to_zmin = center_z - zmin
     distance_to_zmax = zmax - center_z
 
-    # Set split values
+    # Define split values
     split_value_upper = center_z + distance_to_zmax
     split_value_lower = center_z - distance_to_zmin
 
@@ -52,7 +52,7 @@ def split_section_by_z(section):
     split_value_upper = min(split_value_upper, zmax)
     split_value_lower = max(split_value_lower, zmin)
 
-    # Middle section width is based on the Y-axis
+    # Width of the sections based on the Y-axis
     middle_width_ymin = center_z - (ymax - ymin) / 2
     middle_width_ymax = center_z + (ymax - ymin) / 2
 
@@ -65,8 +65,8 @@ def split_section_by_z(section):
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            section.bounds[2],
-            section.bounds[3],
+            ymin,
+            ymax,
             center_z,
             split_value_upper),
         invert=False)
@@ -85,8 +85,8 @@ def split_section_by_z(section):
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            section.bounds[2],
-            section.bounds[3],
+            ymin,
+            ymax,
             zmin,
             center_z),
         invert=False)
@@ -108,7 +108,7 @@ def split_section_by_y(section):
     distance_to_ymin = center_y - ymin
     distance_to_ymax = ymax - center_y
 
-    # Set split values
+    # Define split values
     split_value_right = center_y + distance_to_ymax
     split_value_left = center_y - distance_to_ymin
 
@@ -116,7 +116,7 @@ def split_section_by_y(section):
     split_value_right = min(split_value_right, ymax)
     split_value_left = max(split_value_left, ymin)
 
-    # Middle section width is based on the Z-axis
+    # Width of the sections based on the Z-axis
     middle_width_zmin = center_y - (zmax - zmin) / 2
     middle_width_zmax = center_y + (zmax - zmin) / 2
 
