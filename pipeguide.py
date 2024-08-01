@@ -52,14 +52,6 @@ def split_section_by_z(section):
     split_value_upper = min(split_value_upper, zmax)
     split_value_lower = max(split_value_lower, zmin)
 
-    # Width of the sections based on the Y-axis
-    middle_width_ymin = center_z - (ymax - ymin) / 2
-    middle_width_ymax = center_z + (ymax - ymin) / 2
-
-    # Ensure the middle width is within bounds
-    middle_width_ymin = max(middle_width_ymin, zmin)
-    middle_width_ymax = min(middle_width_ymax, zmax)
-
     # Define clipping boxes
     mesh_upper = section.clip_box(
         bounds=(
@@ -69,16 +61,6 @@ def split_section_by_z(section):
             ymax,
             center_z,
             split_value_upper),
-        invert=False)
-
-    mesh_middle = section.clip_box(
-        bounds=(
-            section.bounds[0],
-            section.bounds[1],
-            ymin,
-            ymax,
-            middle_width_ymin,
-            middle_width_ymax),
         invert=False)
 
     mesh_lower = section.clip_box(
@@ -91,7 +73,7 @@ def split_section_by_z(section):
             center_z),
         invert=False)
 
-    return mesh_upper, mesh_middle, mesh_lower
+    return mesh_upper, mesh_lower
 
 
 def split_section_by_y(section):
@@ -116,14 +98,6 @@ def split_section_by_y(section):
     split_value_right = min(split_value_right, ymax)
     split_value_left = max(split_value_left, ymin)
 
-    # Width of the sections based on the Z-axis
-    middle_width_zmin = center_y - (zmax - zmin) / 2
-    middle_width_zmax = center_y + (zmax - zmin) / 2
-
-    # Ensure the middle width is within bounds
-    middle_width_zmin = max(middle_width_zmin, ymin)
-    middle_width_zmax = min(middle_width_zmax, ymax)
-
     # Define clipping boxes
     mesh_left = section.clip_box(
         bounds=(
@@ -133,16 +107,6 @@ def split_section_by_y(section):
             center_y,
             zmin,
             zmax),
-        invert=False)
-
-    mesh_middle = section.clip_box(
-        bounds=(
-            section.bounds[0],
-            section.bounds[1],
-            split_value_left,
-            split_value_right,
-            middle_width_zmin,
-            middle_width_zmax),
         invert=False)
 
     mesh_right = section.clip_box(
@@ -155,7 +119,7 @@ def split_section_by_y(section):
             zmax),
         invert=False)
 
-    return mesh_left, mesh_middle, mesh_right
+    return mesh_left, mesh_right
 
 
 def compute_centroid_and_width(section, width_axis):
@@ -208,7 +172,7 @@ def write_to_xml(sections_info, output_file):
               num_elements}) in XML than expected ({expected_num_sections}).")
 
 
-def process_half(sections, width_axis, order, cutoff, part):
+def process_half(sections, axis, order, cutoff, part):
     centroids = []
     widths = []
 
@@ -217,31 +181,25 @@ def process_half(sections, width_axis, order, cutoff, part):
             if part is None:
                 current_section = section
             else:
-                if width_axis == 'z':
-                    mesh_upper, mesh_middle, mesh_lower = split_section_by_z(
-                        section)
+                if axis == 'z':
+                    mesh_upper, mesh_lower = split_section_by_z(section)
                     if part == 'upper' and mesh_upper.n_points > 0:
                         current_section = mesh_upper
-                    elif part == 'middle' and mesh_middle.n_points > 0:
-                        current_section = mesh_middle
                     elif part == 'lower' and mesh_lower.n_points > 0:
                         current_section = mesh_lower
                     else:
                         continue
-                elif width_axis == 'y':
-                    mesh_left, mesh_middle, mesh_right = split_section_by_y(
-                        section)
-                    if part == 'upper' and mesh_left.n_points > 0:
+                elif axis == 'y':
+                    mesh_left, mesh_right = split_section_by_y(section)
+                    if part == 'left' and mesh_left.n_points > 0:
                         current_section = mesh_left
-                    elif part == 'middle' and mesh_middle.n_points > 0:
-                        current_section = mesh_middle
-                    elif part == 'lower' and mesh_right.n_points > 0:
+                    elif part == 'right' and mesh_right.n_points > 0:
                         current_section = mesh_right
                     else:
                         continue
 
             centroid, width = compute_centroid_and_width(
-                current_section, width_axis)
+                current_section, axis)
             centroids.append(centroid)
             widths.append(width)
 
@@ -265,66 +223,32 @@ def process_half(sections, width_axis, order, cutoff, part):
     return smoothed_centroids_x, smoothed_centroids_y, smoothed_centroids_z, smoothed_widths
 
 
-def align_and_merge(upper_info, middle_info, lower_info):
-    upper_x, upper_y, upper_z, upper_widths = upper_info
-    middle_x, middle_y, middle_z, middle_widths = middle_info
-    lower_x, lower_y, lower_z, lower_widths = lower_info
-
+def align_and_merge(upper_info, lower_info, left_info, right_info):
     sections_info = []
 
-    # Process upper sections
-    for i in range(len(upper_x)):
-        ax = upper_x[i]
-        ay = upper_y[i]
-        az = upper_z[i]
-        bx = upper_x[i + 1] if i + 1 < len(upper_x) else ax
-        by = upper_y[i + 1] if i + 1 < len(upper_y) else ay
-        bz = upper_z[i + 1] if i + 1 < len(upper_z) else az
-        width_start = upper_widths[i]
-        width_end = upper_widths[i + 1] if i + \
-            1 < len(upper_widths) else width_start
+    def process_section_info(info, position):
+        for i in range(len(info[0])):
+            ax = info[0][i]
+            ay = info[1][i]
+            az = info[2][i]
+            bx = info[0][i + 1] if i + 1 < len(info[0]) else ax
+            by = info[1][i + 1] if i + 1 < len(info[1]) else ay
+            bz = info[2][i + 1] if i + 1 < len(info[2]) else az
+            width_start = info[3][i]
+            width_end = info[3][i + 1] if i + 1 < len(info[3]) else width_start
 
-        taper = min(width_start, width_end) / max(width_start, width_end)
-        midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
-        width = max(width_start, width_end)
+            taper = min(width_start, width_end) / max(width_start, width_end)
+            midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
+            width = max(width_start, width_end)
 
-        sections_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
+            sections_info.append(
+                (ax, ay, az, bx, by, bz, width, taper, midpoint))
 
-    # Process middle sections
-    for i in range(len(middle_x)):
-        ax = middle_x[i]
-        ay = middle_y[i]
-        az = middle_z[i]
-        bx = middle_x[i + 1] if i + 1 < len(middle_x) else ax
-        by = middle_y[i + 1] if i + 1 < len(middle_y) else ay
-        bz = middle_z[i + 1] if i + 1 < len(middle_z) else az
-        width_start = middle_widths[i]
-        width_end = middle_widths[i + 1] if i + \
-            1 < len(middle_widths) else width_start
-
-        taper = min(width_start, width_end) / max(width_start, width_end)
-        midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
-        width = max(width_start, width_end)
-
-        sections_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
-
-    # Process lower sections
-    for i in range(len(lower_x)):
-        ax = lower_x[i]
-        ay = lower_y[i]
-        az = lower_z[i]
-        bx = lower_x[i + 1] if i + 1 < len(lower_x) else ax
-        by = lower_y[i + 1] if i + 1 < len(lower_y) else ay
-        bz = lower_z[i + 1] if i + 1 < len(lower_z) else az
-        width_start = lower_widths[i]
-        width_end = lower_widths[i + 1] if i + \
-            1 < len(lower_widths) else width_start
-
-        taper = min(width_start, width_end) / max(width_start, width_end)
-        midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
-        width = max(width_start, width_end)
-
-        sections_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
+    # Process each part
+    process_section_info(upper_info, 'upper')
+    process_section_info(lower_info, 'lower')
+    process_section_info(left_info, 'left')
+    process_section_info(right_info, 'right')
 
     return sections_info
 
@@ -335,8 +259,7 @@ def main(
         num_sections,
         order,
         cutoff,
-        width_axis,
-        triple_mode):
+        dual_axis_mode):
     global expected_num_sections
     expected_num_sections = num_sections
 
@@ -360,22 +283,26 @@ def main(
         return
 
     try:
-        if triple_mode:
+        if dual_axis_mode:
             upper_info = process_half(
-                sections, width_axis, order, cutoff, part='upper')
-            middle_info = process_half(
-                sections, width_axis, order, cutoff, part='middle')
+                sections, 'z', order, cutoff, part='upper')
             lower_info = process_half(
-                sections, width_axis, order, cutoff, part='lower')
+                sections, 'z', order, cutoff, part='lower')
+
+            left_info = process_half(
+                sections, 'y', order, cutoff, part='left')
+            right_info = process_half(
+                sections, 'y', order, cutoff, part='right')
+
             sections_info = align_and_merge(
-                upper_info, middle_info, lower_info)
+                upper_info, lower_info, left_info, right_info)
         else:
             centroids = []
             widths = []
             for section in sections:
                 try:
                     centroid, width = compute_centroid_and_width(
-                        section, width_axis)
+                        section, 'y')  # Assuming 'y' as default axis if not dual_axis_mode
                     centroids.append(centroid)
                     widths.append(width)
                 except ValueError as e:
@@ -409,13 +336,13 @@ def main(
                     (ax, ay, az, bx, by, bz, width, taper, midpoint))
 
     except Exception as e:
-        print(f"An error occurred during processing: {e}")
+        print(f"An unexpected error occurred: {e}")
         return
 
     try:
         write_to_xml(sections_info, output_file)
-    except Exception as e:
-        print(f"Error writing to XML: {e}")
+    except IOError as e:
+        print(f"Error writing XML file: {e}")
 
 
 if __name__ == "__main__":
@@ -432,18 +359,10 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output-file", default="yasim.xml",
                         help="Output XML file (default: yasim.xml)")
     parser.add_argument(
-        "-w",
-        "--width-axis",
-        choices=[
-            'y',
-            'z'],
-        default='z',
-        help="Axis to use for width calculation (default: z)")
-    parser.add_argument(
-        "-t",
-        "--triple-mode",
+        "-d",
+        "--dual-axis-mode",
         action="store_true",
-        help="Process upper, middle, and lower halves separately")
+        help="Process upper and lower halves separately and left and right sections")
 
     args = parser.parse_args()
 
@@ -453,5 +372,4 @@ if __name__ == "__main__":
         num_sections=args.sections,
         order=args.filter_order,
         cutoff=args.filter_cutoff,
-        width_axis=args.width_axis,
-        triple_mode=args.triple_mode)
+        dual_axis_mode=args.dual_axis_mode)
