@@ -37,34 +37,50 @@ def split_section_by_z(section):
         raise ValueError("Section has no points.")
 
     zmin, zmax = section.bounds[4], section.bounds[5]
+    ymin, ymax = section.bounds[2], section.bounds[3]
     center_z = centroid[2]
-    total_height = zmax - zmin
 
-    split_value_upper = center_z
-    split_value_middle_lower = center_z - (total_height * 0.25)
-    split_value_middle_upper = center_z + (total_height * 0.25)
+    # Calculate distances to the edges
+    distance_to_zmin = center_z - zmin
+    distance_to_zmax = zmax - center_z
 
-    split_value_middle_lower = max(split_value_middle_lower, zmin)
-    split_value_middle_upper = min(split_value_middle_upper, zmax)
+    # Set split values
+    split_value_upper = center_z + distance_to_zmax
+    split_value_lower = center_z - distance_to_zmin
 
+    # Ensure split values are within bounds
+    split_value_upper = min(split_value_upper, zmax)
+    split_value_lower = max(split_value_lower, zmin)
+
+    # Middle section width is based on the Y-axis
+    middle_width_ymin = center_z - (ymax - ymin) / 2
+    middle_width_ymax = center_z + (ymax - ymin) / 2
+
+    # Ensure the middle width is within bounds
+    middle_width_ymin = max(middle_width_ymin, zmin)
+    middle_width_ymax = min(middle_width_ymax, zmax)
+
+    # Define clipping boxes
     mesh_upper = section.clip_box(
         bounds=(
             section.bounds[0],
             section.bounds[1],
             section.bounds[2],
             section.bounds[3],
-            split_value_upper,
-            section.bounds[5]),
+            center_z,
+            split_value_upper),
         invert=False)
+
     mesh_middle = section.clip_box(
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            section.bounds[2],
-            section.bounds[3],
-            split_value_middle_lower,
-            split_value_middle_upper),
+            ymin,
+            ymax,
+            middle_width_ymin,
+            middle_width_ymax),
         invert=False)
+
     mesh_lower = section.clip_box(
         bounds=(
             section.bounds[0],
@@ -72,7 +88,7 @@ def split_section_by_z(section):
             section.bounds[2],
             section.bounds[3],
             zmin,
-            split_value_upper),
+            center_z),
         invert=False)
 
     return mesh_upper, mesh_middle, mesh_lower
@@ -85,42 +101,58 @@ def split_section_by_y(section):
         raise ValueError("Section has no points.")
 
     ymin, ymax = section.bounds[2], section.bounds[3]
+    zmin, zmax = section.bounds[4], section.bounds[5]
     center_y = centroid[1]
-    total_width = ymax - ymin
 
-    split_value_left = center_y
-    split_value_middle_left = center_y - (total_width * 0.25)
-    split_value_middle_right = center_y + (total_width * 0.25)
+    # Calculate distances to the edges
+    distance_to_ymin = center_y - ymin
+    distance_to_ymax = ymax - center_y
 
-    split_value_middle_left = max(split_value_middle_left, ymin)
-    split_value_middle_right = min(split_value_middle_right, ymax)
+    # Set split values
+    split_value_right = center_y + distance_to_ymax
+    split_value_left = center_y - distance_to_ymin
 
+    # Ensure split values are within bounds
+    split_value_right = min(split_value_right, ymax)
+    split_value_left = max(split_value_left, ymin)
+
+    # Middle section width is based on the Z-axis
+    middle_width_zmin = center_y - (zmax - zmin) / 2
+    middle_width_zmax = center_y + (zmax - zmin) / 2
+
+    # Ensure the middle width is within bounds
+    middle_width_zmin = max(middle_width_zmin, ymin)
+    middle_width_zmax = min(middle_width_zmax, ymax)
+
+    # Define clipping boxes
     mesh_left = section.clip_box(
         bounds=(
             section.bounds[0],
             section.bounds[1],
             ymin,
-            split_value_left,
-            section.bounds[4],
-            section.bounds[5]),
+            center_y,
+            zmin,
+            zmax),
         invert=False)
+
     mesh_middle = section.clip_box(
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            split_value_middle_left,
-            split_value_middle_right,
-            section.bounds[4],
-            section.bounds[5]),
+            split_value_left,
+            split_value_right,
+            middle_width_zmin,
+            middle_width_zmax),
         invert=False)
+
     mesh_right = section.clip_box(
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            split_value_left,
+            center_y,
             ymax,
-            section.bounds[4],
-            section.bounds[5]),
+            zmin,
+            zmax),
         invert=False)
 
     return mesh_left, mesh_middle, mesh_right
@@ -403,7 +435,6 @@ if __name__ == "__main__":
         "-w",
         "--width-axis",
         choices=[
-            'x',
             'y',
             'z'],
         default='z',
