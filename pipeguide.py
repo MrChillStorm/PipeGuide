@@ -60,7 +60,7 @@ def split_section_by_z(section):
             ymin,
             ymax,
             center_z,
-            split_value_upper),
+            zmax),
         invert=False)
 
     mesh_lower = section.clip_box(
@@ -91,12 +91,12 @@ def split_section_by_y(section):
     distance_to_ymax = ymax - center_y
 
     # Define split values
-    split_value_right = center_y + distance_to_ymax
     split_value_left = center_y - distance_to_ymin
+    split_value_right = center_y + distance_to_ymax
 
     # Ensure split values are within bounds
-    split_value_right = min(split_value_right, ymax)
     split_value_left = max(split_value_left, ymin)
+    split_value_right = min(split_value_right, ymax)
 
     # Define clipping boxes
     mesh_left = section.clip_box(
@@ -302,7 +302,7 @@ def main(
             for section in sections:
                 try:
                     centroid, width = compute_centroid_and_width(
-                        section, 'y')  # Assuming 'y' as default axis if not dual_axis_mode
+                        section, 'z')  # Assuming 'z' as default axis if not dual_axis_mode
                     centroids.append(centroid)
                     widths.append(width)
                 except ValueError as e:
