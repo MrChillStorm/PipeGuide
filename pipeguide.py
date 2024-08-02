@@ -60,7 +60,7 @@ def split_section_by_z(section):
             ymin,
             ymax,
             center_z,
-            zmax),
+            split_value_upper),
         invert=False)
 
     mesh_lower = section.clip_box(
@@ -69,7 +69,7 @@ def split_section_by_z(section):
             section.bounds[1],
             ymin,
             ymax,
-            zmin,
+            split_value_lower,
             center_z),
         invert=False)
 
@@ -103,7 +103,7 @@ def split_section_by_y(section):
         bounds=(
             section.bounds[0],
             section.bounds[1],
-            ymin,
+            split_value_left,
             center_y,
             zmin,
             zmax),
@@ -114,7 +114,7 @@ def split_section_by_y(section):
             section.bounds[0],
             section.bounds[1],
             center_y,
-            ymax,
+            split_value_right,
             zmin,
             zmax),
         invert=False)
