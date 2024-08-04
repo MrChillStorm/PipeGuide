@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
-import numpy as np
-import pyvista as pv
+
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 from scipy.signal import bessel, filtfilt
+import pyvista as pv
+import numpy as np
 import argparse
 
 
@@ -23,8 +25,7 @@ def extract_fuselage_sections(mesh, num_sections):
         section = mesh.clip_box(
             bounds=(start_x, end_x, ymin, ymax, zmin, zmax), invert=False)
         if section.n_points == 0:
-            print(f"Warning: Section between x={
-                  start_x} and x={end_x} is empty.")
+            print(f"Warning: Section between x={start_x} and x={end_x} is empty.")
         else:
             sections.append(section)
     return sections
@@ -143,6 +144,17 @@ def apply_bessel_filter(values, order, cutoff):
 
 
 def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
+    # Round values to three decimal places
+    ax = round(ax, 3)
+    ay = round(ay, 3)
+    az = round(az, 3)
+    bx = round(bx, 3)
+    by = round(by, 3)
+    bz = round(bz, 3)
+    width = round(width, 3)
+    taper = round(taper, 3)
+    midpoint = round(midpoint, 3)
+
     element = ET.Element('fuselage')
     element.set('ax', str(ax))
     element.set('ay', str(ay))
@@ -156,20 +168,27 @@ def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
     return element
 
 
-def write_to_xml(sections_info, output_file):
+def write_to_xml(sections_info, output_file, expected_num_sections):
     root = ET.Element('airplane')
     for info in sections_info:
         element = create_xml_element(*info)
         root.append(element)
-    tree = ET.ElementTree(root)
-    tree.write(output_file, xml_declaration=True,
-               encoding='utf-8', method="xml")
+
+    # Convert the ElementTree to a string
+    rough_string = ET.tostring(root, 'utf-8')
+
+    # Parse and pretty-print using minidom
+    reparsed = minidom.parseString(rough_string)
+    pretty_xml_as_string = reparsed.toprettyxml(indent="  ")
+
+    # Write to file
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(pretty_xml_as_string)
 
     num_elements = len(root)
     print(f"XML written with {num_elements} sections.")
     if num_elements < expected_num_sections:
-        print(f"Warning: Fewer sections ({
-              num_elements}) in XML than expected ({expected_num_sections}).")
+        print(f"Warning: Fewer sections ({num_elements}) in XML than expected ({expected_num_sections}).")
 
 
 def process_half(sections, axis, order, cutoff, part):
@@ -340,7 +359,7 @@ def main(
         return
 
     try:
-        write_to_xml(sections_info, output_file)
+        write_to_xml(sections_info, output_file, expected_num_sections)
     except IOError as e:
         print(f"Error writing XML file: {e}")
 
