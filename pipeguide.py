@@ -8,11 +8,24 @@ import pyvista as pv
 import numpy as np
 import argparse
 
+# Rotation matrix for 90 degrees around the x-axis
+rotation_matrix_x_90 = np.array([
+    [1, 0, 0],
+    [0, 0, -1],
+    [0, 1, 0]
+])
+
 
 def load_fuselage_model(file_path):
     mesh = pv.read(file_path)
     if mesh is None:
         raise ValueError(f"Failed to load mesh from {file_path}.")
+
+    # Rotate the mesh if it's an OBJ file
+    if file_path.lower().endswith('.obj'):
+        print("Applying 90-degree rotation around the x-axis for OBJ file.")
+        mesh.points = mesh.points @ rotation_matrix_x_90.T
+
     return mesh
 
 
