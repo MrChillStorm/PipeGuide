@@ -242,11 +242,14 @@ def process_half(sections, axis, order, cutoff, part):
     return smoothed_centroids_x, smoothed_centroids_y, smoothed_centroids_z, smoothed_widths
 
 
-def align_and_merge(upper_info, lower_info, left_info, right_info):
+def align_and_merge(upper_info, lower_info, left_info, right_info, expected_num_sections):
     sections_info = []
+    all_infos = [upper_info, lower_info, left_info, right_info]
 
-    def process_section_info(info, position):
-        for i in range(len(info[0])):
+    def merge_zero_length_sections(info):
+        merged_info = []
+        i = 0
+        while i < len(info[0]):
             ax = info[0][i]
             ay = info[1][i]
             az = info[2][i]
@@ -260,14 +263,60 @@ def align_and_merge(upper_info, lower_info, left_info, right_info):
             midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
             width = max(width_start, width_end)
 
-            sections_info.append(
-                (ax, ay, az, bx, by, bz, width, taper, midpoint))
+            if (ax == bx) and (ay == by) and (az == bz):
+                if i + 1 < len(info[0]):
+                    next_ax = info[0][i + 1]
+                    next_ay = info[1][i + 1]
+                    next_az = info[2][i + 1]
+                    next_bx = info[0][i + 2] if i + 2 < len(info[0]) else next_ax
+                    next_by = info[1][i + 2] if i + 2 < len(info[1]) else next_ay
+                    next_bz = info[2][i + 2] if i + 2 < len(info[2]) else next_az
+                    next_width_start = info[3][i + 1]
+                    next_width_end = info[3][i + 2] if i + 2 < len(info[3]) else next_width_start
 
-    # Process each part
-    process_section_info(upper_info, 'upper')
-    process_section_info(lower_info, 'lower')
-    process_section_info(left_info, 'left')
-    process_section_info(right_info, 'right')
+                    merged_section = (
+                        ax, ay, az,
+                        next_bx, next_by, next_bz,
+                        max(width_start, next_width_end),
+                        (taper + min(next_width_start, next_width_end) / max(next_width_start, next_width_end)) / 2,
+                        (midpoint + (1.0 if next_width_start < next_width_end else 0.0 if next_width_start > next_width_end else 0.5)) / 2
+                    )
+                    merged_info.append(merged_section)
+                    i += 2
+                else:
+                    i += 1
+            else:
+                merged_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
+                i += 1
+
+        return merged_info
+
+    # Merge zero-length sections for each part
+    for info in all_infos:
+        if info:
+            sections_info.extend(merge_zero_length_sections(info))
+
+    # Adjust to the exact number of sections
+    if len(sections_info) < expected_num_sections:
+        # If fewer sections, merge adjacent sections to meet the expected number
+        while len(sections_info) < expected_num_sections:
+            if len(sections_info) == 0:
+                print("Error: No valid sections to merge.")
+                break
+
+            # Merge last two sections
+            last_section = sections_info.pop()
+            if len(sections_info) > 0:
+                prev_section = sections_info.pop()
+
+                ax, ay, az = prev_section[0:3]
+                bx, by, bz = last_section[3:6]
+                width = max(prev_section[6], last_section[6])
+                taper = min(prev_section[6], last_section[6]) / width
+                midpoint = (prev_section[8] + last_section[8]) / 2
+
+                new_section = (ax, ay, az, bx, by, bz, width, taper, midpoint)
+                sections_info.append(new_section)
 
     return sections_info
 
@@ -314,7 +363,7 @@ def main(
                 sections, 'y', order, cutoff, part='right')
 
             sections_info = align_and_merge(
-                upper_info, lower_info, left_info, right_info)
+                upper_info, lower_info, left_info, right_info, expected_num_sections)
         else:
             centroids = []
             widths = []
@@ -340,14 +389,11 @@ def main(
                 ax, ay, az = smoothed_centroids_x[i], smoothed_centroids_y[i], smoothed_centroids_z[i]
                 bx, by, bz = smoothed_centroids_x[i + 1] if i + 1 < len(smoothed_centroids_x) else ax, \
                     smoothed_centroids_y[i + 1] if i + 1 < len(smoothed_centroids_y) else ay, \
-                    smoothed_centroids_z[i + 1] if i + \
-                    1 < len(smoothed_centroids_z) else az
+                    smoothed_centroids_z[i + 1] if i + 1 < len(smoothed_centroids_z) else az
                 width_start = smoothed_widths[i]
-                width_end = smoothed_widths[i + 1] if i + \
-                    1 < len(smoothed_widths) else width_start
+                width_end = smoothed_widths[i + 1] if i + 1 < len(smoothed_widths) else width_start
 
-                taper = min(width_start, width_end) / \
-                    max(width_start, width_end)
+                taper = min(width_start, width_end) / max(width_start, width_end)
                 midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
                 width = max(width_start, width_end)
 
