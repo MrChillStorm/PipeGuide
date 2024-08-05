@@ -37,7 +37,7 @@ cd PipeGuide
 2. **Ensure you have Python 3 installed. Then, install the required libraries with**:
 
 ```bash
-pip3 install numpy pyvista scipy
+pip3 install lxml numpy pyvista scipy
 ```
 
 ## Usage
