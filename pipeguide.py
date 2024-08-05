@@ -272,12 +272,16 @@ def align_and_merge(upper_info, lower_info, left_info, right_info, expected_num_
             width_start = info[3][i]
             width_end = info[3][i + 1] if i + 1 < len(info[3]) else width_start
 
-            taper = min(width_start, width_end) / max(width_start, width_end)
+            # Calculate taper and midpoint for non-zero width sections
+            taper = min(width_start, width_end) / max(width_start, width_end) if width_end != 0 else 1
             midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
             width = max(width_start, width_end)
 
+            # Check if the section is zero-length
             if (ax == bx) and (ay == by) and (az == bz):
+                # Skip zero-length sections
                 if i + 1 < len(info[0]):
+                    # Merge zero-length section with the next one if possible
                     next_ax = info[0][i + 1]
                     next_ay = info[1][i + 1]
                     next_az = info[2][i + 1]
@@ -325,7 +329,7 @@ def align_and_merge(upper_info, lower_info, left_info, right_info, expected_num_
                 ax, ay, az = prev_section[0:3]
                 bx, by, bz = last_section[3:6]
                 width = max(prev_section[6], last_section[6])
-                taper = min(prev_section[6], last_section[6]) / width
+                taper = min(prev_section[6], last_section[6]) / width if width != 0 else 1
                 midpoint = (prev_section[8] + last_section[8]) / 2
 
                 new_section = (ax, ay, az, bx, by, bz, width, taper, midpoint)
@@ -362,6 +366,55 @@ def main(
     if not sections:
         print("Error: No valid sections were extracted.")
         return
+
+    def merge_zero_length_sections(info):
+        merged_info = []
+        i = 0
+        while i < len(info[0]):
+            ax = info[0][i]
+            ay = info[1][i]
+            az = info[2][i]
+            bx = info[0][i + 1] if i + 1 < len(info[0]) else ax
+            by = info[1][i + 1] if i + 1 < len(info[1]) else ay
+            bz = info[2][i + 1] if i + 1 < len(info[2]) else az
+            width_start = info[3][i]
+            width_end = info[3][i + 1] if i + 1 < len(info[3]) else width_start
+
+            # Calculate taper and midpoint for non-zero length sections
+            taper = min(width_start, width_end) / max(width_start, width_end) if width_end != 0 else 1
+            midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
+            width = max(width_start, width_end)
+
+            # Check if the section is zero-length
+            if (ax == bx) and (ay == by) and (az == bz):
+                # Skip zero-length sections
+                if i + 1 < len(info[0]):
+                    # Merge zero-length section with the next one if possible
+                    next_ax = info[0][i + 1]
+                    next_ay = info[1][i + 1]
+                    next_az = info[2][i + 1]
+                    next_bx = info[0][i + 2] if i + 2 < len(info[0]) else next_ax
+                    next_by = info[1][i + 2] if i + 2 < len(info[1]) else next_ay
+                    next_bz = info[2][i + 2] if i + 2 < len(info[2]) else next_az
+                    next_width_start = info[3][i + 1]
+                    next_width_end = info[3][i + 2] if i + 2 < len(info[3]) else next_width_start
+
+                    merged_section = (
+                        ax, ay, az,
+                        next_bx, next_by, next_bz,
+                        max(width_start, next_width_end),
+                        (taper + min(next_width_start, next_width_end) / max(next_width_start, next_width_end)) / 2,
+                        (midpoint + (1.0 if next_width_start < next_width_end else 0.0 if next_width_start > next_width_end else 0.5)) / 2
+                    )
+                    merged_info.append(merged_section)
+                    i += 2
+                else:
+                    i += 1
+            else:
+                merged_info.append((ax, ay, az, bx, by, bz, width, taper, midpoint))
+                i += 1
+
+        return merged_info
 
     try:
         if dual_axis_mode:
@@ -406,12 +459,16 @@ def main(
                 width_start = smoothed_widths[i]
                 width_end = smoothed_widths[i + 1] if i + 1 < len(smoothed_widths) else width_start
 
-                taper = min(width_start, width_end) / max(width_start, width_end)
+                taper = min(width_start, width_end) / max(width_start, width_end) if width_end != 0 else 1
                 midpoint = 1.0 if width_start < width_end else 0.0 if width_start > width_end else 0.5
                 width = max(width_start, width_end)
 
                 sections_info.append(
                     (ax, ay, az, bx, by, bz, width, taper, midpoint))
+
+            # Merge zero-length sections
+            sections_info = merge_zero_length_sections(
+                (smoothed_centroids_x, smoothed_centroids_y, smoothed_centroids_z, smoothed_widths))
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
