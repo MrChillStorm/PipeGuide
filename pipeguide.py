@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
 from scipy.signal import bessel, filtfilt
 import pyvista as pv
 import numpy as np
+from lxml import etree
 import argparse
 
 # Rotation matrix for 90 degrees around the x-axis
@@ -157,46 +155,36 @@ def apply_bessel_filter(values, order, cutoff):
 
 
 def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
-    # Round values to three decimal places
-    ax = round(ax, 3)
-    ay = round(ay, 3)
-    az = round(az, 3)
-    bx = round(bx, 3)
-    by = round(by, 3)
-    bz = round(bz, 3)
-    width = round(width, 3)
-    taper = round(taper, 3)
-    midpoint = round(midpoint, 3)
+    # Round values to three decimal places and format with trailing zeros
+    def format_number(value):
+        return f"{value:.3f}"
 
-    element = ET.Element('fuselage')
-    element.set('ax', str(ax))
-    element.set('ay', str(ay))
-    element.set('az', str(az))
-    element.set('bx', str(bx))
-    element.set('by', str(by))
-    element.set('bz', str(bz))
-    element.set('width', str(width))
-    element.set('taper', str(taper))
-    element.set('midpoint', str(midpoint))
+    element = etree.Element('fuselage')
+    element.set('ax', format_number(ax))
+    element.set('ay', format_number(ay))
+    element.set('az', format_number(az))
+    element.set('bx', format_number(bx))
+    element.set('by', format_number(by))
+    element.set('bz', format_number(bz))
+    element.set('width', format_number(width))
+    element.set('taper', format_number(taper))
+    element.set('midpoint', format_number(midpoint))
     return element
 
 
 def write_to_xml(sections_info, output_file, expected_num_sections):
-    root = ET.Element('airplane')
+    root = etree.Element('airplane')
     for info in sections_info:
         element = create_xml_element(*info)
         root.append(element)
 
-    # Convert the ElementTree to a string
-    rough_string = ET.tostring(root, 'utf-8')
-
-    # Parse and pretty-print using minidom
-    reparsed = minidom.parseString(rough_string)
-    pretty_xml_as_string = reparsed.toprettyxml(indent="  ")
+    # Pretty-print the XML
+    formatted_xml_string = etree.tostring(
+        root, pretty_print=True, xml_declaration=True, encoding='UTF-8').decode('utf-8')
 
     # Write to file
     with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(pretty_xml_as_string)
+        f.write(formatted_xml_string)
 
     num_elements = len(root)
     print(f"XML written with {num_elements} sections.")
