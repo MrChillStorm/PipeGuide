@@ -158,8 +158,8 @@ def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
     def format_number(value):
         formatted = f"{value:.3f}"
         # Strip minus sign if the value is -0.000
-        if formatted == "-0.000":
-            formatted = "0.000"
+        if formatted == "-0.000" or formatted == "0.000":
+            formatted = "0"
         return formatted
 
     def format_midpoint(value):
