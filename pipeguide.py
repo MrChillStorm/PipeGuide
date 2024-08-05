@@ -227,10 +227,7 @@ def process_half(sections, axis, order, cutoff, part):
             print(f"Error processing section: {e}")
 
     if len(centroids) != len(sections):
-        print(
-            f"Warning: Number of processed centroids ({
-                len(centroids)}) does not match number of sections ({
-                len(sections)})")
+        print(f"Warning: Number of processed centroids ({len(centroids)}) does not match number of sections ({len(sections)})")
 
     smoothed_centroids_x = apply_bessel_filter(
         [c[0] for c in centroids], order, cutoff)
