@@ -156,7 +156,11 @@ def apply_bessel_filter(values, order, cutoff):
 
 def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
     def format_number(value):
-        return f"{value:.3f}"
+        formatted = f"{value:.3f}"
+        # Strip minus sign if the value is -0.000
+        if formatted == "-0.000":
+            formatted = "0.000"
+        return formatted
 
     def format_midpoint(value):
         return f"{int(value)}"
