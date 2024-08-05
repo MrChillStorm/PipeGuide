@@ -155,9 +155,11 @@ def apply_bessel_filter(values, order, cutoff):
 
 
 def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
-    # Round values to three decimal places and format with trailing zeros
     def format_number(value):
         return f"{value:.3f}"
+
+    def format_midpoint(value):
+        return f"{int(value)}"
 
     element = etree.Element('fuselage')
     element.set('ax', format_number(ax))
@@ -168,8 +170,36 @@ def create_xml_element(ax, ay, az, bx, by, bz, width, taper, midpoint):
     element.set('bz', format_number(bz))
     element.set('width', format_number(width))
     element.set('taper', format_number(taper))
-    element.set('midpoint', format_number(midpoint))
+    element.set('midpoint', format_midpoint(midpoint))
     return element
+
+
+def get_max_lengths(sections_info):
+    max_lengths = {
+        'ax': 0, 'ay': 0, 'az': 0,
+        'bx': 0, 'by': 0, 'bz': 0,
+        'width': 0, 'taper': 0, 'midpoint': 0
+    }
+
+    for info in sections_info:
+        ax, ay, az, bx, by, bz, width, taper = map(lambda x: f"{x:.3f}", info[:-1])
+        midpoint = f"{int(info[-1])}"
+        for key, value in zip(max_lengths.keys(), [ax, ay, az, bx, by, bz, width, taper, midpoint]):
+            max_lengths[key] = max(max_lengths[key], len(value))
+
+    return max_lengths
+
+
+def format_element(element, max_lengths):
+    formatted_attributes = []
+    for key, value in element.attrib.items():
+        # Calculate padding needed to match the longest value
+        padding = max_lengths[key] - len(value)
+        formatted_value = f"{' ' * padding}{value}"
+        formatted_attributes.append(f'{key}="{formatted_value}"')
+
+    tag = element.tag
+    return f'<{tag} ' + ' '.join(formatted_attributes) + ' />'
 
 
 def write_to_xml(sections_info, output_file, expected_num_sections):
@@ -178,9 +208,16 @@ def write_to_xml(sections_info, output_file, expected_num_sections):
         element = create_xml_element(*info)
         root.append(element)
 
-    # Pretty-print the XML
-    formatted_xml_string = etree.tostring(
-        root, pretty_print=True, xml_declaration=True, encoding='UTF-8').decode('utf-8')
+    # Calculate the maximum lengths for each attribute
+    max_lengths = get_max_lengths(sections_info)
+
+    # Create formatted XML string
+    formatted_xml_lines = ['<airplane>']
+    for elem in root:
+        formatted_xml_lines.append(format_element(elem, max_lengths))
+    formatted_xml_lines.append('</airplane>')
+
+    formatted_xml_string = '\n'.join(formatted_xml_lines)
 
     # Write to file
     with open(output_file, 'w', encoding='utf-8') as f:
