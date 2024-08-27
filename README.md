@@ -64,7 +64,7 @@ The `-d` and `-x` options provide different methods for processing the fuselage 
 
 - **Dual-Axis Mode (`-d`)**: This mode processes and refines the fuselage sections with dynamic adjustments to more accurately follow the shape. It involves splitting the fuselage along both the z-axis and y-axis, allowing for a more detailed representation.
 
-- **Diagonal-Axis Mode (`-x`)**: This mode rotates the fuselage model 45 degrees around the x-axis before processing. It then processes and refines sections along diagonal axes (a combination of the x and y axes), capturing a different perspective on the fuselage shape.
+- **Diagonal-Axis Mode (`-x`)**: This mode rotates the fuselage model 45 degrees around the x-axis before processing. It then processes and refines sections along diagonal axes (a combination of the z and y axes), capturing a different perspective on the fuselage shape.
 
 While these modes cannot be used simultaneously during runtime, **you can run the tool separately with each mode and then combine the outputs**. This approach allows you to leverage the strengths of both modes, providing a more comprehensive and accurate model that better captures complex fuselage shapes.
 
