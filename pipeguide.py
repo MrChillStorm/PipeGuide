@@ -550,11 +550,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "input_file", help="Input file path for the fuselage model")
     parser.add_argument("-s", "--sections", type=int,
-                        default=60, help="Number of sections (default: 60)")
+                        default=63, help="Number of sections (default: 63)")
     parser.add_argument("-f", "--filter-order", type=int,
-                        default=2, help="Filter order (default: 2)")
+                        default=5, help="Filter order (default: 5)")
     parser.add_argument("-c", "--filter-cutoff", type=float,
-                        default=0.14, help="Filter cutoff (default: 0.14)")
+                        default=0.5, help="Filter cutoff (default: 0.5)")
     parser.add_argument("-o", "--output-file", default="yasim.xml",
                         help="Output XML file (default: yasim.xml)")
     parser.add_argument(
