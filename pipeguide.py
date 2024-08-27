@@ -13,6 +13,13 @@ rotation_matrix_x_90 = np.array([
     [0, 1, 0]
 ])
 
+# Rotation matrix for 45 degrees around the x-axis
+rotation_matrix_x_45 = np.array([
+    [1, 0, 0],
+    [0, np.cos(np.pi/4), -np.sin(np.pi/4)],
+    [0, np.sin(np.pi/4), np.cos(np.pi/4)]
+])
+
 
 def load_fuselage_model(file_path):
     mesh = pv.read(file_path)
@@ -370,7 +377,8 @@ def main(
         num_sections,
         order,
         cutoff,
-        dual_axis_mode):
+        dual_axis_mode,
+        diagonal_axis_mode):
     global expected_num_sections
     expected_num_sections = num_sections
 
@@ -382,6 +390,11 @@ def main(
     except ValueError as ve:
         print(f"Error: {ve}")
         return
+
+    # Apply diagonal axis mode (rotate 45 degrees around the x-axis)
+    if diagonal_axis_mode:
+        print("Applying 45-degree rotation around the x-axis.")
+        mesh.points = mesh.points @ rotation_matrix_x_45.T
 
     try:
         sections = extract_fuselage_sections(mesh, num_sections)
@@ -443,7 +456,7 @@ def main(
         return merged_info
 
     try:
-        if dual_axis_mode:
+        if dual_axis_mode or diagonal_axis_mode:
             upper_info = process_half(
                 sections, 'z', order, cutoff, part='upper')
             lower_info = process_half(
@@ -500,6 +513,31 @@ def main(
         print(f"An unexpected error occurred: {e}")
         return
 
+    # Define the rotation matrix for +45 degrees around the x-axis
+    angle_plus_45 = np.radians(45)
+    rotation_matrix_x_plus_45 = np.array([
+        [1, 0, 0],
+        [0, np.cos(angle_plus_45), -np.sin(angle_plus_45)],
+        [0, np.sin(angle_plus_45), np.cos(angle_plus_45)]
+    ])
+
+
+    # Rotate back if diagonal_axis_mode was applied
+    if diagonal_axis_mode:
+        print("Reverting 45-degree rotation around the x-axis.")
+        # Apply the reverse rotation to the sections_info
+        rotated_sections_info = []
+        for section in sections_info:
+            ax, ay, az, bx, by, bz, width, taper, midpoint = section
+            a_rotated = np.array([ax, ay, az]) @ rotation_matrix_x_plus_45.T
+            b_rotated = np.array([bx, by, bz]) @ rotation_matrix_x_plus_45.T
+            rotated_sections_info.append((
+                a_rotated[0], a_rotated[1], a_rotated[2],
+                b_rotated[0], b_rotated[1], b_rotated[2],
+                width, taper, midpoint
+            ))
+        sections_info = rotated_sections_info
+
     try:
         write_to_xml(sections_info, output_file, expected_num_sections)
     except IOError as e:
@@ -524,6 +562,11 @@ if __name__ == "__main__":
         "--dual-axis-mode",
         action="store_true",
         help="Process upper and lower halves separately and left and right sections")
+    parser.add_argument(
+        "-x",
+        "--diagonal-axis-mode",
+        action="store_true",
+        help="Rotate the model 45 degrees around the x-axis before processing")
 
     args = parser.parse_args()
 
@@ -533,4 +576,5 @@ if __name__ == "__main__":
         num_sections=args.sections,
         order=args.filter_order,
         cutoff=args.filter_cutoff,
-        dual_axis_mode=args.dual_axis_mode)
+        dual_axis_mode=args.dual_axis_mode,
+        diagonal_axis_mode=args.diagonal_axis_mode)
