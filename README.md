@@ -55,7 +55,7 @@ python3 pipeguide.py [input_file] [options]
 - `-s`, `--sections`: Maximum number of pipes (default: 63). The adaptive fitter uses fewer when the shape allows; `--legacy` uses exactly this many.
 - `-t`, `--tolerance`: Adaptive fit target, RMS error as a fraction of local radius (default: 0.01). Lower is tighter and uses more pipes; `0` always uses `--sections`.
 - `-b`, `--bias`: Adaptive fit, from -1 to 1 (default: 0). `0` balances over- and under-fit so total volume matches the model; positive favours pipes that contain the model, negative pipes that sit inside it.
-- `--fit`: What each round pipe matches: `area` (default, preserves cross-section area, which is what drives frontal drag), `perimeter`, or `enclosing` (smallest circle around the section).
+- `--fit`: What each round pipe matches: `area` (default, preserves cross-section area), `perimeter`, or `enclosing` (smallest circle around the section).
 - `--lobes`: Pipes per cross-section. `1` (default) is a single round pipe. `N` spreads N overlapping pipes across the wider direction, and `auto` adds lobes while each one improves overlap by at least 1%. See Multi-Lobe Fitting below.
 - `--legacy`: Use the original fixed-section Bessel pipeline. Implied by `-d` and `-x`.
 - `-f`, `--filter-order`: Order of the Bessel filter (`--legacy`, `-d`, `-x` only).
@@ -81,7 +81,9 @@ With `--lobes N` (or `auto`), each cross-section becomes a row of N equal round 
 
 On a synthetic wide, flat body, overlap with the model rose from 51% (one pipe) to 89% (3 lobes, 24 pipes) and 93% (4 lobes, 28 pipes).
 
-**Flight-model caveat:** lobes overlap. If your FDM counts drag, mass or lift per pipe, overlapping pipes are counted more than once, while the single-pipe default preserves cross-section area. Compare a `--lobes 1` and a `--lobes N` run in your flight model before relying on it.
+**Flight-model effect (from YASim's `Airplane::compileFuselage`):** YASim treats every pipe independently and never accounts for overlap. Each pipe is cut into `ceil(length/width)` segments, each adding a surface whose drag weight is its local width times its share of the length (so a pipe's drag scales with width, not cross-section area), plus mass proportional to that weight to the power 1.5. Both ends of every pipe also become ground-contact points. On the synthetic bodies, lobes raised YASim's drag weight 1.8x to 2.4x and mass weight 1.1x to 2x on non-round sections, and changed nothing on round ones. PipeGuide prints these ratios and the factor to apply to `cx`, `cy` and `cz` to keep the single-pipe drag budget.
+
+The tapered pipes PipeGuide writes (`midpoint` 0 or 1) are only interpreted correctly by YASim version 32 and newer; older versions use a different taper formula, so set `version="YASIM_VERSION_32"` or later on the airplane.
 
 Run the tests with `pip install pytest` and `python3 -m pytest tests`.
 

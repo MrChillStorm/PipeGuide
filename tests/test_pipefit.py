@@ -149,3 +149,31 @@ def test_auto_adds_lobes_only_when_they_help():
 def test_lobe_row_runs_across_the_wide_direction():
     pts, tris = synthetic.flat_belly()
     assert pipefit.lobe_axis(pipefit.sample_profile(pts, tris)) == "y"
+
+
+def test_yasim_totals_match_hand_computation():
+    # One unit-width, length-2 cylinder: 2 segments, each weight 1.
+    t = pipefit.yasim_totals([(0, 0, 0, 2, 0, 0, 1.0, 1.0, 0.5)])
+    assert t["surfaces"] == 2 and t["contacts"] == 2
+    assert t["drag"] == pytest.approx(2.0) and t["mass"] == pytest.approx(2.0)
+
+
+def test_lobes_inflate_yasim_drag_only_where_pipes_overlap():
+    def drag(kind, n):
+        pts, tris = synthetic.BODIES[kind](noise=0.002)
+        prof = pipefit.sample_profile(pts, tris)
+        ch = (pipefit.fit_lobes(prof, n) if n > 1
+              else pipefit.fit_chain(prof.x, prof.channels("area")))
+        return pipefit.yasim_totals(pipefit.chain_to_sections(ch.extended(*prof.x_range)))["drag"]
+    assert drag("liner", 3) == pytest.approx(drag("liner", 1), rel=0.05)
+    assert drag("flat_belly", 3) > 1.5 * drag("flat_belly", 1)
+
+
+@pytest.mark.parametrize("stations", [400, 504, 640])
+def test_pipe_count_is_stable_across_station_counts(stations):
+    # Regression: a borderline error percentile once flipped this between
+    # ~20 and 180 pipes depending only on the sampling density.
+    pts, tris = synthetic.flat_belly()
+    prof = pipefit.sample_profile(pts, tris, n_stations=stations)
+    chain = pipefit.fit_lobes(prof, 3)
+    assert len(pipefit.chain_to_sections(chain)) <= 30

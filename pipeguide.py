@@ -419,6 +419,19 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
     print(f"Versus the model: {quality['under'] * 100:.1f}% under-fit, "
           f"{quality['over'] * 100:.1f}% over-fit, "
           f"{quality['iou'] * 100:.1f}% overlap.")
+    totals = pipefit.yasim_totals(sections_info)
+    print(f"YASim will see: {totals['surfaces']} surfaces, "
+          f"{totals['contacts']} ground-contact points.")
+    if chain.n_lobes > 1:
+        single = pipefit.fit_chain(
+            profile.x, profile.channels(fit), kmax=max_sections,
+            tol=tolerance, bias=bias).extended(*profile.x_range)
+        ref = pipefit.yasim_totals(pipefit.chain_to_sections(single))
+        ratio = totals['drag'] / ref['drag']
+        print(f"Overlapping pipes are summed by YASim: drag weight x{ratio:.2f}, "
+              f"mass weight x{totals['mass'] / ref['mass']:.2f} versus one pipe "
+              f"per section. To keep the single-pipe drag, set cx, cy and cz "
+              f"on these fuselages to about {1 / ratio:.2f} of their usual value.")
     try:
         write_to_xml(sections_info, output_file, 0)
     except IOError as e:

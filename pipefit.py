@@ -467,15 +467,18 @@ def fit_chain(x, F, kmax=63, tol=0.01, bias=0.0, center_weight=0.5,
 
     # Never ask for accuracy below the measurement noise: that would make the
     # chain trace tessellation jitter (over-fit) and burn pipes for nothing.
-    d2 = (F[:-2, 2] - 2 * F[1:-1, 2] + F[2:, 2]) * np.sqrt(ws[1:-1])
-    sigma = 1.4826 * np.median(np.abs(d2 - np.median(d2))) / sqrt(6)
+    # Estimated from second differences of every fitted channel (a smooth
+    # curve has ~0 there; jitter does not), in relative units.
+    d2 = (F[:-2] - 2 * F[1:-1] + F[2:]) * cw * np.sqrt(ws[1:-1])[:, None]
+    sigma = max(1.4826 * np.median(np.abs(d2[:, c] - np.median(d2[:, c]))) / sqrt(6)
+                for c in range(F.shape[1]))
     tol_eff = max(tol, 1.5 * sigma)
 
     top = build(kmax)
     # Tolerance beyond what kmax pipes can reach: settle for the knee, the
     # fewest pipes within 10% of the best achievable error.
     rms_goal = max(tol_eff, top.rms * 1.1)
-    p99_goal = max(4 * tol_eff, top.p99_err * 1.1)
+    p99_goal = max(6 * tol_eff, top.p99_err * 1.5)
 
     def ok(ch):
         return ch.rms <= rms_goal and ch.p99_err <= p99_goal
@@ -642,6 +645,36 @@ def chain_to_sections(chain, prune=0.1):
                 continue
             out.append(cone(ra, rb, at(i, m), at(i + 1, m)))
     return out
+
+
+def yasim_totals(sections):
+    """What YASim (version 32+) derives from these pipes.
+
+    Mirrors Airplane::compileFuselage: each pipe is cut into ceil(len/width)
+    segments; a segment of local width scale ``s`` adds drag weight
+    s*len*width/segs and mass weight (s*len*width/segs)^1.5. Pipes are summed
+    independently, so overlapping pipes are counted in full.
+
+    Returns dict(drag, mass, surfaces, contacts). ``drag`` is ~ the integral
+    of width along the body, in length^2.
+    """
+    drag = mass = 0.0
+    surfaces = 0
+    for ax, ay, az, bx, by, bz, wid, taper, mid in sections:
+        ln = float(np.linalg.norm([ax - bx, ay - by, az - bz]))
+        if ln == 0 or wid <= 0:
+            continue
+        segs = int(np.ceil(ln / wid))
+        seg_wgt = ln * wid / segs
+        frac = (np.arange(segs) + 0.5) / segs
+        scale = np.where(frac < mid,
+                         taper + (1 - taper) * frac / max(mid, 1e-12),
+                         1 - (1 - taper) * (frac - mid) / max(1 - mid, 1e-12))
+        drag += float((scale * seg_wgt).sum())
+        mass += float(((scale * seg_wgt) ** 1.5).sum())
+        surfaces += segs
+    return {"drag": drag, "mass": mass, "surfaces": surfaces,
+            "contacts": 2 * len(sections)}
 
 
 # --------------------------------------------------------------------------
