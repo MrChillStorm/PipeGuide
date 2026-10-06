@@ -248,6 +248,7 @@ class Chain:
     d: np.ndarray = None   # lobe spacing per knot (multi-lobe fits only)
     n_lobes: int = 1
     axis: str = "y"        # direction the lobes are spread along
+    info: dict = None      # cost breakdown when chosen by fit_balanced
 
     @property
     def n_segments(self):
@@ -258,7 +259,7 @@ class Chain:
         x = self.x.copy()
         x[0], x[-1] = min(x[0], xmin), max(x[-1], xmax)
         return Chain(x, self.cy, self.cz, self.r, self.rms, self.p99_err,
-                     self.d, self.n_lobes, self.axis)
+                     self.d, self.n_lobes, self.axis, self.info)
 
     def at(self, xq):
         """(cy, cz, r) interpolated at positions xq."""
@@ -587,16 +588,52 @@ def fit_lobes(profile, n, axis=None, tol=0.01, kmax=63, bias=0.0, stride=2):
     return ch
 
 
-def fit_auto(profile, max_lobes=4, min_gain=0.01, **kw):
-    """Add lobes only while each extra one buys at least ``min_gain`` overlap."""
-    best = fit_chain(profile.x, profile.channels("area"), **kw)
-    best_ev = evaluate_sections(profile, chain_to_sections(best.extended(*profile.x_range)))
-    for n in range(2, max_lobes + 1):
-        cand = fit_lobes(profile, n, **kw)
-        ev = evaluate_sections(profile, chain_to_sections(cand.extended(*profile.x_range)))
-        if ev["iou"] - best_ev["iou"] < min_gain:
-            break
-        best, best_ev = cand, ev
+def fit_balanced(profile, pipe_cost=0.002, fdm_weight=0.1, max_lobes=4,
+                 kmax=63, bias=0.0, tols=(0.05, 0.02, 0.01, 0.005, 0.0025)):
+    """Choose sections and lobes by minimising one explicit cost.
+
+        J = (under-fit + over-fit)            how badly the shape is matched
+          + fdm_weight * fdm_damage           how far YASim's view is distorted
+          + pipe_cost  * pipes                what each extra pipe must earn
+
+    Shape terms are fractions of model volume, measured by ``evaluate_sections``;
+    FDM damage is measured against one area-matched pipe per section, see
+    ``fdm_damage``. Candidates span lobe counts and section tolerances. Ties
+    go to fewer lobes, then fewer pipes. ``fdm_weight=0`` optimises shape
+    alone; the cost breakdown of the winner is stored in ``chain.info``.
+    """
+    axis = lobe_axis(profile)
+    idx = np.arange(0, len(profile.x), 2)
+    ref_chain = fit_chain(profile.x, profile.channels("area"), kmax=kmax,
+                          tol=0.01, bias=bias).extended(*profile.x_range)
+    ref = chain_to_sections(ref_chain)
+
+    best, best_j = None, np.inf
+    for n in range(1, max_lobes + 1):
+        if n == 1:
+            x, F = profile.x, profile.channels("area")
+        else:
+            x, F = profile.x[idx], lobe_channels(profile, n, axis, idx)
+        seen = set()
+        for tol in tols:
+            ch = fit_chain(x, F, kmax=kmax, tol=tol, bias=bias)
+            ch.n_lobes, ch.axis = n, axis
+            ch = ch.extended(*profile.x_range)
+            secs = chain_to_sections(ch)
+            key = (len(secs), ch.n_segments)
+            if key in seen:
+                continue
+            seen.add(key)
+            ev = evaluate_sections(profile, secs, n_stations=64, grid=80)
+            damage, det = fdm_damage(secs, ref, profile.x_range)
+            shape = ev["under"] + ev["over"]
+            j = shape + fdm_weight * damage + pipe_cost * len(secs)
+            if j < best_j - 1e-12:
+                best_j = j
+                best = ch
+                best.info = {"cost": j, "shape_mismatch": shape,
+                             "fdm_damage": damage, "pipes": len(secs),
+                             "under": ev["under"], "over": ev["over"], **det}
     return best
 
 
@@ -647,18 +684,9 @@ def chain_to_sections(chain, prune=0.1):
     return out
 
 
-def yasim_totals(sections):
-    """What YASim (version 32+) derives from these pipes.
-
-    Mirrors Airplane::compileFuselage: each pipe is cut into ceil(len/width)
-    segments; a segment of local width scale ``s`` adds drag weight
-    s*len*width/segs and mass weight (s*len*width/segs)^1.5. Pipes are summed
-    independently, so overlapping pipes are counted in full.
-
-    Returns dict(drag, mass, surfaces, contacts). ``drag`` is ~ the integral
-    of width along the body, in length^2.
-    """
-    drag = mass = 0.0
+def _yasim_segments(sections):
+    """Per-segment (x position, drag weight, mass weight) as YASim builds them."""
+    pos, drag, mass = [], [], []
     surfaces = 0
     for ax, ay, az, bx, by, bz, wid, taper, mid in sections:
         ln = float(np.linalg.norm([ax - bx, ay - by, az - bz]))
@@ -670,11 +698,62 @@ def yasim_totals(sections):
         scale = np.where(frac < mid,
                          taper + (1 - taper) * frac / max(mid, 1e-12),
                          1 - (1 - taper) * (frac - mid) / max(1 - mid, 1e-12))
-        drag += float((scale * seg_wgt).sum())
-        mass += float(((scale * seg_wgt) ** 1.5).sum())
+        pos.append(ax + frac * (bx - ax))
+        drag.append(scale * seg_wgt)
+        mass.append((scale * seg_wgt) ** 1.5)
         surfaces += segs
-    return {"drag": drag, "mass": mass, "surfaces": surfaces,
-            "contacts": 2 * len(sections)}
+    cat = lambda l: np.concatenate(l) if l else np.zeros(0)
+    return cat(pos), cat(drag), cat(mass), surfaces
+
+
+def yasim_totals(sections):
+    """What YASim (version 32+) derives from these pipes.
+
+    Mirrors Airplane::compileFuselage: each pipe is cut into ceil(len/width)
+    segments; a segment of local width scale ``s`` adds drag weight
+    s*len*width/segs and mass weight (s*len*width/segs)^1.5. Pipes are summed
+    independently, so overlapping pipes are counted in full.
+
+    Returns dict(drag, mass, surfaces, contacts). ``drag`` is ~ the integral
+    of width along the body, in length^2.
+    """
+    _, d, m, surfaces = _yasim_segments(sections)
+    return {"drag": float(d.sum()), "mass": float(m.sum()),
+            "surfaces": surfaces, "contacts": 2 * len(sections)}
+
+
+def fdm_damage(sections, reference, x_range, bins=32):
+    """How much the pipes distort the FDM compared with a reference layout.
+
+    A uniform drag change is not damage: it is undone by scaling the
+    fuselage's cx/cy/cz. What cannot be undone is *where* the drag and mass
+    sit along the body (overlap inflates them only in the lobed stretches)
+    and the overall mass level. So:
+
+      damage = TV(drag distribution) + TV(mass distribution) + |ln mass ratio|
+
+    where TV is total-variation distance (0 identical .. 1 disjoint) between
+    the normalised distributions along x. Returns (damage, details).
+    """
+    edges = np.linspace(-x_range[1], -x_range[0], bins + 1)
+
+    def dist(secs):
+        pos, d, m, _ = _yasim_segments(secs)
+        hd = np.histogram(pos, edges, weights=d)[0]
+        hm = np.histogram(pos, edges, weights=m)[0]
+        return hd, hm
+
+    hd, hm = dist(sections)
+    rd, rm = dist(reference)
+    if hd.sum() <= 0 or rd.sum() <= 0 or hm.sum() <= 0 or rm.sum() <= 0:
+        return 1.0, {"drag_shift": 1.0, "mass_shift": 1.0, "mass_ratio": 1.0,
+                     "drag_ratio": 1.0}
+    tv_d = 0.5 * np.abs(hd / hd.sum() - rd / rd.sum()).sum()
+    tv_m = 0.5 * np.abs(hm / hm.sum() - rm / rm.sum()).sum()
+    mass_ratio = hm.sum() / rm.sum()
+    return float(tv_d + tv_m + abs(np.log(mass_ratio))), {
+        "drag_shift": float(tv_d), "mass_shift": float(tv_m),
+        "mass_ratio": float(mass_ratio), "drag_ratio": float(hd.sum() / rd.sum())}
 
 
 # --------------------------------------------------------------------------

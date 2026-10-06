@@ -137,13 +137,58 @@ def test_lobe_pipe_count_stays_bounded():
     assert len(secs) <= 3 * chain.n_segments
 
 
-def test_auto_adds_lobes_only_when_they_help():
-    pts, tris = synthetic.liner(noise=0.002)
+def balanced(kind, **kw):
+    pts, tris = synthetic.BODIES[kind](noise=0.002)
     prof = pipefit.sample_profile(pts, tris)
-    assert pipefit.fit_auto(prof).n_lobes == 1
-    pts, tris = synthetic.flat_belly(noise=0.002)
+    ch = pipefit.fit_balanced(prof, **kw)
+    secs = pipefit.chain_to_sections(ch)
+    return ch, secs, pipefit.evaluate_sections(prof, secs)
+
+
+def test_balanced_keeps_round_bodies_minimal():
+    ch, secs, ev = balanced("liner")
+    assert ch.n_lobes == 1 and len(secs) <= 8 and ev["iou"] > 0.99
+
+
+def test_balanced_adds_lobes_when_they_pay_for_themselves():
+    ch, secs, ev = balanced("flat_belly")
+    assert ch.n_lobes >= 3 and ev["iou"] > 0.85
+
+
+def test_higher_pipe_price_means_fewer_pipes():
+    cheap = len(balanced("flat_belly", pipe_cost=0.0005, fdm_weight=0)[1])
+    dear = len(balanced("flat_belly", pipe_cost=0.02, fdm_weight=0)[1])
+    assert dear < cheap
+
+
+def test_fdm_weight_trades_shape_for_less_distortion():
+    free = balanced("glider", fdm_weight=0.0)[0].info
+    guarded = balanced("glider", fdm_weight=0.3)[0].info
+    assert guarded["fdm_damage"] < free["fdm_damage"]
+    assert guarded["shape_mismatch"] > free["shape_mismatch"]
+
+
+def test_single_pipe_layout_has_zero_fdm_damage_against_itself():
+    pts, tris = synthetic.glider()
     prof = pipefit.sample_profile(pts, tris)
-    assert pipefit.fit_auto(prof).n_lobes >= 3
+    secs = pipefit.chain_to_sections(
+        pipefit.fit_chain(prof.x, prof.channels("area")).extended(*prof.x_range))
+    damage, det = pipefit.fdm_damage(secs, secs, prof.x_range)
+    assert damage == pytest.approx(0.0, abs=1e-9)
+    assert det["drag_ratio"] == pytest.approx(1.0)
+
+
+def test_fdm_damage_ignores_uniform_drag_scaling_but_not_redistribution():
+    base = [(0, 0, 0, 4, 0, 0, 1.0, 1.0, 0.5)]
+    # Same pipe twice over the whole length: drag doubles uniformly.
+    twice = base * 2
+    _, uniform = pipefit.fdm_damage(twice, base, (-4, 0))
+    assert uniform["drag_shift"] == pytest.approx(0.0, abs=1e-9)
+    assert uniform["drag_ratio"] == pytest.approx(2.0)
+    # Extra pipe over just the first half: drag is redistributed.
+    half = base + [(0, 0, 0, 2, 0, 0, 1.0, 1.0, 0.5)]
+    moved, det = pipefit.fdm_damage(half, base, (-4, 0))
+    assert det["drag_shift"] > 0.1
 
 
 def test_lobe_row_runs_across_the_wide_direction():

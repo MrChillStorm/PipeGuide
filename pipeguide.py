@@ -380,7 +380,7 @@ def mesh_to_arrays(mesh):
 
 
 def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
-                  lobes='1'):
+                  lobes='1', pipe_cost=0.002, fdm_weight=0.1):
     """Fit the fewest pipes that follow the model within tolerance."""
     try:
         mesh = load_fuselage_model(file_path)
@@ -400,8 +400,9 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
                 profile.x, profile.channels(fit), kmax=max_sections,
                 tol=tolerance, bias=bias)
         elif lobes == 'auto':
-            chain = pipefit.fit_auto(
-                profile, kmax=max_sections, tol=tolerance, bias=bias)
+            chain = pipefit.fit_balanced(
+                profile, pipe_cost=pipe_cost, fdm_weight=fdm_weight,
+                kmax=max_sections, bias=bias)
         else:
             chain = pipefit.fit_lobes(
                 profile, int(lobes), kmax=max_sections, tol=tolerance, bias=bias)
@@ -419,6 +420,12 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
     print(f"Versus the model: {quality['under'] * 100:.1f}% under-fit, "
           f"{quality['over'] * 100:.1f}% over-fit, "
           f"{quality['iou'] * 100:.1f}% overlap.")
+    if chain.info:
+        i = chain.info
+        print(f"Balanced choice: {chain.n_lobes} lobe(s), shape mismatch "
+              f"{i['shape_mismatch'] * 100:.1f}%, FDM distortion {i['fdm_damage']:.2f} "
+              f"(drag shifted {i['drag_shift'] * 100:.0f}%, mass shifted "
+              f"{i['mass_shift'] * 100:.0f}%, mass x{i['mass_ratio']:.2f}).")
     totals = pipefit.yasim_totals(sections_info)
     print(f"YASim will see: {totals['surfaces']} surfaces, "
           f"{totals['contacts']} ground-contact points.")
@@ -654,8 +661,19 @@ if __name__ == "__main__":
         "--lobes", default="1",
         help="Adaptive fit: pipes per cross-section. 1 (default) is one round pipe; "
              "N spreads N overlapping pipes across the wider direction for "
-             "non-round sections; auto picks N while each extra lobe adds "
-             "overlap. Lobes are pruned wherever they would duplicate a neighbour")
+             "non-round sections; auto searches sections and lobes together for "
+             "the best trade-off of shape, FDM distortion and pipe count (see --pipe-cost, --fdm-weight). "
+             "Lobes are pruned wherever they would duplicate a neighbour")
+    parser.add_argument(
+        "--pipe-cost", type=float, default=0.002,
+        help="--lobes auto: cost of each pipe, in the same units as shape mismatch "
+             "(fraction of model volume). Higher = fewer pipes (default: 0.002)")
+    parser.add_argument(
+        "--fdm-weight", type=float, default=0.1,
+        help="--lobes auto: weight of the distortion overlapping pipes cause in "
+             "YASim (where drag and mass sit along the body). 0 = optimise the "
+             "shape only; higher keeps the layout closer to one pipe per section "
+             "(default: 0.1)")
     parser.add_argument(
         "--legacy", action="store_true",
         help="Use the original fixed-section Bessel pipeline (implied by -d/-x)")
@@ -672,7 +690,9 @@ if __name__ == "__main__":
             tolerance=args.tolerance,
             bias=args.bias,
             fit=args.fit,
-            lobes=args.lobes)
+            lobes=args.lobes,
+            pipe_cost=args.pipe_cost,
+            fdm_weight=args.fdm_weight)
         raise SystemExit
 
     main(
