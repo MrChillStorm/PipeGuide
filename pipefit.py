@@ -588,17 +588,21 @@ def fit_lobes(profile, n, axis=None, tol=0.01, kmax=63, bias=0.0, stride=2):
     return ch
 
 
-def fit_balanced(profile, pipe_cost=0.002, fdm_weight=0.1, max_lobes=4,
-                 kmax=63, bias=0.0, tols=(0.05, 0.02, 0.01, 0.005, 0.0025)):
+def fit_balanced(profile, pipe_cost=0.002, fdm_weight=0.1, aero_weight=1.0,
+                 max_lobes=4, kmax=63, bias=0.0,
+                 tols=(0.05, 0.02, 0.01, 0.005, 0.0025)):
     """Choose sections and lobes by minimising one explicit cost.
 
-        J = (under-fit + over-fit)            how badly the shape is matched
-          + fdm_weight * fdm_damage           how far YASim's view is distorted
-          + pipe_cost  * pipes                what each extra pipe must earn
+        J = (under-fit + over-fit)            how badly the outline is matched
+          + aero_weight * aero RMS error      how far drag-governing geometry is off
+          + fdm_weight  * fdm_damage          how far YASim's view is distorted
+          + pipe_cost   * pipes               what each extra pipe must earn
 
     Shape terms are fractions of model volume, measured by ``evaluate_sections``;
-    FDM damage is measured against one area-matched pipe per section, see
-    ``fdm_damage``. Candidates span lobe counts and section tolerances. Ties
+    the aero term is the RMS relative error of volume, maximum section, side
+    and plan projected area and wetted area against the model, see
+    ``aero_geometry``; FDM damage is measured against one area-matched pipe
+    per section, see ``fdm_damage``. Candidates span lobe counts and section tolerances. Ties
     go to fewer lobes, then fewer pipes. ``fdm_weight=0`` optimises shape
     alone; the cost breakdown of the winner is stored in ``chain.info``.
     """
@@ -607,6 +611,7 @@ def fit_balanced(profile, pipe_cost=0.002, fdm_weight=0.1, max_lobes=4,
     ref_chain = fit_chain(profile.x, profile.channels("area"), kmax=kmax,
                           tol=0.01, bias=bias).extended(*profile.x_range)
     ref = chain_to_sections(ref_chain)
+    truth = aero_geometry(profile, None, n_stations=48, grid=64)
 
     best, best_j = None, np.inf
     for n in range(1, max_lobes + 1):
@@ -626,13 +631,16 @@ def fit_balanced(profile, pipe_cost=0.002, fdm_weight=0.1, max_lobes=4,
             seen.add(key)
             ev = evaluate_sections(profile, secs, n_stations=64, grid=80)
             damage, det = fdm_damage(secs, ref, profile.x_range)
+            aero = aero_error(profile, secs, truth, n_stations=48, grid=64)
             shape = ev["under"] + ev["over"]
-            j = shape + fdm_weight * damage + pipe_cost * len(secs)
+            j = (shape + aero_weight * aero["rms"] + fdm_weight * damage
+                 + pipe_cost * len(secs))
             if j < best_j - 1e-12:
                 best_j = j
                 best = ch
                 best.info = {"cost": j, "shape_mismatch": shape,
                              "fdm_damage": damage, "pipes": len(secs),
+                             "aero": aero,
                              "under": ev["under"], "over": ev["over"], **det}
     return best
 
@@ -771,6 +779,95 @@ def _inside_polygon(px, py, poly):
             xint = a + (py - b) * (c - a) / (d - b)
         inside ^= cond & (px < xint)
     return inside
+
+
+def _pipe_arrays(sections):
+    """Section tuples -> model-axis arrays (xa, xb, ya, yb, za, zb, ra, rb)."""
+    S = np.array(sections, dtype=float)
+    ax, ay, az, bx, by, bz, width, taper, mid = S.T
+    wide, narrow = width / 2, width / 2 * taper
+    ra = np.where(mid >= 1.0, narrow, wide)
+    rb = np.where(mid >= 1.0, wide, narrow)
+    flat = np.isclose(taper, 1.0)
+    return (-ax, -bx, -ay, -by, az, bz, np.where(flat, wide, ra), np.where(flat, wide, rb))
+
+
+def _circles_at(arrs, x):
+    xa, xb, ya, yb, za, zb, ra, rb = arrs
+    lo, hi = np.minimum(xa, xb), np.maximum(xa, xb)
+    act = np.where((x >= lo - 1e-9) & (x <= hi + 1e-9) & (hi > lo))[0]
+    out = []
+    for k in act:
+        f = (x - xa[k]) / (xb[k] - xa[k])
+        out.append((ya[k] + f * (yb[k] - ya[k]), za[k] + f * (zb[k] - za[k]),
+                    ra[k] + f * (rb[k] - ra[k])))
+    return out
+
+
+AERO_KEYS = ("volume", "max_section", "side_area", "plan_area", "wetted")
+
+
+def aero_geometry(profile, sections=None, n_stations=96, grid=96):
+    """Geometric quantities that govern drag, for the model or for pipes.
+
+    volume       integral of cross-section area along x
+    max_section  largest cross-section area (form-drag area scale)
+    side_area    projected area seen from the side (integral of height)
+    plan_area    projected area seen from above (integral of width)
+    wetted       skin area (integral of cross-section perimeter)
+
+    With ``sections=None`` they come from the model, otherwise from the
+    union of the pipe discs, sampled at the same stations so the two are
+    directly comparable.
+    """
+    idx = np.unique(np.linspace(0, len(profile.x) - 1, n_stations).astype(int))
+    idx = np.array([i for i in idx if profile.polys[i] is not None])
+    xs = profile.x[idx]
+    area = np.zeros(len(idx)); width = np.zeros(len(idx))
+    height = np.zeros(len(idx)); perim = np.zeros(len(idx))
+    if sections is None:
+        for k, i in enumerate(idx):
+            poly = profile.polys[i]
+            area[k], perim[k] = profile.area[i], profile.perim[i]
+            width[k], height[k] = np.ptp(poly[:, 0]), np.ptp(poly[:, 1])
+    else:
+        arrs = _pipe_arrays(sections)
+        ang = np.linspace(0, 2 * pi, 180, endpoint=False)
+        for k, i in enumerate(idx):
+            circles = _circles_at(arrs, profile.x[i])
+            if not circles:
+                continue
+            C = np.array(circles)
+            width[k] = (C[:, 0] + C[:, 2]).max() - (C[:, 0] - C[:, 2]).min()
+            height[k] = (C[:, 1] + C[:, 2]).max() - (C[:, 1] - C[:, 2]).min()
+            gy = np.linspace((C[:, 0] - C[:, 2]).min(), (C[:, 0] + C[:, 2]).max(), grid)
+            gz = np.linspace((C[:, 1] - C[:, 2]).min(), (C[:, 1] + C[:, 2]).max(), grid)
+            px, py = np.meshgrid(gy, gz)
+            hit = np.zeros(px.shape, dtype=bool)
+            for cy, cz, r in circles:
+                hit |= (px - cy) ** 2 + (py - cz) ** 2 <= r * r
+            area[k] = hit.sum() * (gy[1] - gy[0]) * (gz[1] - gz[0])
+            # Skin: arc length of each circle not buried in another one.
+            for a, (cy, cz, r) in enumerate(circles):
+                qy, qz = cy + r * np.cos(ang), cz + r * np.sin(ang)
+                free = np.ones(len(ang), dtype=bool)
+                for b, (oy, oz, orr) in enumerate(circles):
+                    if b != a:
+                        free &= (qy - oy) ** 2 + (qz - oz) ** 2 > orr * orr * (1 - 1e-9)
+                perim[k] += free.mean() * 2 * pi * r
+    return {"volume": float(np.trapezoid(area, xs)), "max_section": float(area.max()),
+            "side_area": float(np.trapezoid(height, xs)),
+            "plan_area": float(np.trapezoid(width, xs)),
+            "wetted": float(np.trapezoid(perim, xs))}
+
+
+def aero_error(profile, sections, truth=None, **kw):
+    """Relative error of each aero geometry quantity, plus their RMS."""
+    truth = truth or aero_geometry(profile, None, **kw)
+    got = aero_geometry(profile, sections, **kw)
+    rel = {k: got[k] / truth[k] - 1.0 for k in AERO_KEYS}
+    rel["rms"] = float(np.sqrt(np.mean([rel[k] ** 2 for k in AERO_KEYS])))
+    return rel
 
 
 def evaluate_sections(profile, sections, n_stations=96, grid=96):

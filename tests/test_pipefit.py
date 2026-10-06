@@ -222,3 +222,35 @@ def test_pipe_count_is_stable_across_station_counts(stations):
     prof = pipefit.sample_profile(pts, tris, n_stations=stations)
     chain = pipefit.fit_lobes(prof, 3)
     assert len(pipefit.chain_to_sections(chain)) <= 30
+
+
+def aero(kind, n):
+    pts, tris = synthetic.BODIES[kind](noise=0.002)
+    prof = pipefit.sample_profile(pts, tris)
+    ch = (pipefit.fit_lobes(prof, n) if n > 1
+          else pipefit.fit_chain(prof.x, prof.channels("area")))
+    return pipefit.aero_error(prof, pipefit.chain_to_sections(ch.extended(*prof.x_range)))
+
+
+def test_aero_geometry_of_a_cylinder_is_exact():
+    # Cylinder r=1, length 4 along x.
+    pts, tris = synthetic.liner(n_theta=128)
+    prof = pipefit.sample_profile(pts, tris)
+    g = pipefit.aero_geometry(prof)
+    assert g["max_section"] == pytest.approx(np.pi, rel=0.01)
+    assert g["wetted"] > 0 and g["side_area"] > 0 and g["plan_area"] > 0
+
+
+def test_round_body_one_pipe_matches_aero_geometry():
+    assert aero("liner", 1)["rms"] < 0.02
+
+
+def test_single_pipe_misstates_airflow_geometry_of_flat_body():
+    one, lobes = aero("flat_belly", 1), aero("flat_belly", 4)
+    assert abs(one["side_area"]) > 0.5 and one["plan_area"] < -0.25
+    assert lobes["rms"] < 0.05 < one["rms"]
+
+
+def test_balanced_default_reports_aero_error():
+    ch, secs, ev = balanced("flat_belly")
+    assert ch.info["aero"]["rms"] < 0.05

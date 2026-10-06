@@ -380,7 +380,8 @@ def mesh_to_arrays(mesh):
 
 
 def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
-                  lobes='1', pipe_cost=0.002, fdm_weight=0.1):
+                  lobes='auto', pipe_cost=0.002, fdm_weight=0.1,
+                  aero_weight=1.0):
     """Fit the fewest pipes that follow the model within tolerance."""
     try:
         mesh = load_fuselage_model(file_path)
@@ -402,6 +403,7 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
         elif lobes == 'auto':
             chain = pipefit.fit_balanced(
                 profile, pipe_cost=pipe_cost, fdm_weight=fdm_weight,
+                aero_weight=aero_weight,
                 kmax=max_sections, bias=bias)
         else:
             chain = pipefit.fit_lobes(
@@ -426,6 +428,12 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
               f"{i['shape_mismatch'] * 100:.1f}%, FDM distortion {i['fdm_damage']:.2f} "
               f"(drag shifted {i['drag_shift'] * 100:.0f}%, mass shifted "
               f"{i['mass_shift'] * 100:.0f}%, mass x{i['mass_ratio']:.2f}).")
+    aero = pipefit.aero_error(profile, sections_info)
+    print("Airflow geometry vs model: " + ", ".join(
+        f"{name} {aero[key] * 100:+.1f}%" for name, key in (
+            ("volume", "volume"), ("max section", "max_section"),
+            ("side area", "side_area"), ("plan area", "plan_area"),
+            ("wetted area", "wetted"))) + ".")
     totals = pipefit.yasim_totals(sections_info)
     print(f"YASim will see: {totals['surfaces']} surfaces, "
           f"{totals['contacts']} ground-contact points.")
@@ -646,7 +654,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-t", "--tolerance", type=float, default=0.01,
-        help="Adaptive fit: target RMS error as a fraction of local radius "
+        help="With --lobes 1 or N: target RMS error as a fraction of local radius "
              "(default: 0.01). Lower = tighter and more pipes; 0 = always use --sections")
     parser.add_argument(
         "-b", "--bias", type=float, default=0.0,
@@ -658,11 +666,12 @@ if __name__ == "__main__":
              "cross-section area, perimeter the wetted outline, enclosing the "
              "smallest circle around it")
     parser.add_argument(
-        "--lobes", default="1",
-        help="Adaptive fit: pipes per cross-section. 1 (default) is one round pipe; "
-             "N spreads N overlapping pipes across the wider direction for "
-             "non-round sections; auto searches sections and lobes together for "
-             "the best trade-off of shape, FDM distortion and pipe count (see --pipe-cost, --fdm-weight). "
+        "--lobes", default="auto",
+        help="Adaptive fit: pipes per cross-section. auto (default) searches "
+             "sections and lobes together for the best trade-off of shape, airflow "
+             "geometry, FDM distortion and pipe count (see --pipe-cost, "
+             "--fdm-weight, --aero-weight). 1 is one round pipe per section; "
+             "N spreads N overlapping pipes across the wider direction. "
              "Lobes are pruned wherever they would duplicate a neighbour")
     parser.add_argument(
         "--pipe-cost", type=float, default=0.002,
@@ -674,6 +683,11 @@ if __name__ == "__main__":
              "YASim (where drag and mass sit along the body). 0 = optimise the "
              "shape only; higher keeps the layout closer to one pipe per section "
              "(default: 0.1)")
+    parser.add_argument(
+        "--aero-weight", type=float, default=1.0,
+        help="--lobes auto: weight of the error in drag-governing geometry (volume, "
+             "max section, side/plan projected area, wetted area) versus the model "
+             "(default: 1.0)")
     parser.add_argument(
         "--legacy", action="store_true",
         help="Use the original fixed-section Bessel pipeline (implied by -d/-x)")
@@ -692,7 +706,8 @@ if __name__ == "__main__":
             fit=args.fit,
             lobes=args.lobes,
             pipe_cost=args.pipe_cost,
-            fdm_weight=args.fdm_weight)
+            fdm_weight=args.fdm_weight,
+            aero_weight=args.aero_weight)
         raise SystemExit
 
     main(
