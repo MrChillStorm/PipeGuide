@@ -1,0 +1,108 @@
+import os
+import sys
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+
+import pipefit  # noqa: E402
+import synthetic  # noqa: E402
+
+
+def fit(kind, noise=0.0, **kw):
+    pts, tris = synthetic.BODIES[kind](noise=noise)
+    prof = pipefit.sample_profile(pts, tris)
+    chain = pipefit.fit_chain(prof.x, prof.channels("area"), **kw)
+    return prof, chain
+
+
+def test_profile_area_matches_geometry():
+    pts, tris = synthetic.liner(n_theta=96)
+    prof = pipefit.sample_profile(pts, tris)
+    mid = len(prof.x) // 2
+    assert prof.area[mid] == pytest.approx(np.pi, rel=0.01)
+    assert np.allclose(prof.centroid[mid], 0, atol=1e-6)
+
+
+def test_simple_body_needs_few_pipes():
+    _, chain = fit("liner")
+    assert chain.n_segments <= 8
+
+
+def test_beats_legacy_pipe_budget_without_losing_fit():
+    prof, chain = fit("glider")
+    ev = pipefit.evaluate_sections(prof, pipefit.chain_to_sections(chain))
+    assert chain.n_segments < 20
+    # The round-section limit for this body is ~91.8% overlap.
+    assert ev["iou"] > 0.91
+
+
+def test_tighter_tolerance_never_uses_fewer_pipes():
+    counts = [fit("glider", tol=t)[1].n_segments for t in (0.05, 0.01, 0.003)]
+    assert counts == sorted(counts)
+
+
+def test_noise_does_not_inflate_pipe_count():
+    clean = fit("glider")[1].n_segments
+    noisy = fit("glider", noise=0.004)[1].n_segments
+    assert noisy <= clean + 3
+
+
+def test_unreachable_tolerance_does_not_just_use_the_cap():
+    _, chain = fit("glider", tol=1e-6, kmax=63)
+    assert chain.n_segments < 40
+
+
+def test_zero_tolerance_uses_requested_count():
+    _, chain = fit("glider", tol=0, kmax=17)
+    assert chain.n_segments == 17
+
+
+def test_default_is_volume_neutral():
+    prof, chain = fit("glider", noise=0.002)
+    _, _, r = chain.at(prof.x)
+    assert (np.pi * r ** 2).sum() / prof.area.sum() == pytest.approx(1.0, abs=0.01)
+
+
+def test_bias_moves_volume_in_requested_direction():
+    vols = []
+    for b in (-1.0, 0.0, 1.0):
+        prof, chain = fit("glider", bias=b)
+        _, _, r = chain.at(prof.x)
+        vols.append((np.pi * r ** 2).sum())
+    assert vols[0] < vols[1] < vols[2]
+
+
+def test_sections_are_contiguous_and_follow_yasim_convention():
+    prof, chain = fit("glider")
+    chain = chain.extended(*prof.x_range)
+    secs = pipefit.chain_to_sections(chain)
+    for a, b in zip(secs, secs[1:]):
+        assert a[3:6] == pytest.approx(b[0:3])
+    assert secs[0][0] == pytest.approx(-prof.x_range[0])
+    assert secs[-1][3] == pytest.approx(-prof.x_range[1])
+    for s in secs:
+        assert s[6] > 0 and 0 < s[7] <= 1 and s[8] in (0.0, 0.5, 1.0)
+
+
+def test_enclosing_fit_contains_more_than_area_fit():
+    pts, tris = synthetic.flat_belly()
+    prof = pipefit.sample_profile(pts, tris)
+    area_r = prof.channels("area")[:, 2]
+    enc_r = prof.channels("enclosing")[:, 2]
+    assert (enc_r >= area_r - 1e-6)[prof.valid].all()
+
+
+def test_evaluator_scores_perfect_pipe_perfectly():
+    pts, tris = synthetic.liner(n_theta=128)
+    prof = pipefit.sample_profile(pts, tris)
+    chain = pipefit.fit_chain(prof.x, prof.channels("area"), tol=0, kmax=60)
+    ev = pipefit.evaluate_sections(prof, pipefit.chain_to_sections(chain))
+    assert ev["iou"] > 0.99
+
+
+def test_empty_mesh_is_a_clean_error():
+    with pytest.raises(ValueError):
+        pipefit.sample_profile(np.zeros((3, 3)), np.array([[0, 1, 2]]))

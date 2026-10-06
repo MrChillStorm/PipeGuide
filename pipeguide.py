@@ -6,6 +6,8 @@ import numpy as np
 from lxml import etree
 import argparse
 
+import pipefit
+
 # Rotation matrix for 90 degrees around the x-axis
 rotation_matrix_x_90 = np.array([
     [1, 0, 0],
@@ -371,6 +373,47 @@ def align_and_merge(upper_info, lower_info, left_info, right_info, expected_num_
     return sections_info
 
 
+def mesh_to_arrays(mesh):
+    """Triangle vertex/index arrays from any PyVista surface."""
+    surf = mesh.extract_surface(algorithm=None).triangulate()
+    return np.asarray(surf.points, dtype=np.float64), surf.faces.reshape(-1, 4)[:, 1:]
+
+
+def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit):
+    """Fit the fewest pipes that follow the model within tolerance."""
+    try:
+        mesh = load_fuselage_model(file_path)
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} was not found.")
+        return
+    except ValueError as ve:
+        print(f"Error: {ve}")
+        return
+
+    try:
+        points, tris = mesh_to_arrays(mesh)
+        profile = pipefit.sample_profile(
+            points, tris, n_stations=max(480, 8 * max_sections))
+        chain = pipefit.fit_chain(
+            profile.x, profile.channels(fit), kmax=max_sections,
+            tol=tolerance, bias=bias).extended(*profile.x_range)
+    except ValueError as ve:
+        print(f"Error: {ve}")
+        return
+
+    sections_info = pipefit.chain_to_sections(chain)
+    quality = pipefit.evaluate_sections(profile, sections_info)
+    print(f"Fitted {chain.n_segments} pipes (limit {max_sections}), "
+          f"RMS error {chain.rms * 100:.2f}% of local radius.")
+    print(f"Versus the model: {quality['under'] * 100:.1f}% under-fit, "
+          f"{quality['over'] * 100:.1f}% over-fit, "
+          f"{quality['iou'] * 100:.1f}% overlap.")
+    try:
+        write_to_xml(sections_info, output_file, 0)
+    except IOError as e:
+        print(f"Error writing XML file: {e}")
+
+
 def main(
         file_path,
         output_file,
@@ -550,11 +593,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "input_file", help="Input file path for the fuselage model")
     parser.add_argument("-s", "--sections", type=int,
-                        default=63, help="Number of sections (default: 63)")
+                        default=63,
+                        help="Maximum number of sections (default: 63). The adaptive fitter "
+                             "uses fewer when the shape allows; --legacy uses exactly this many")
     parser.add_argument("-f", "--filter-order", type=int,
-                        default=5, help="Filter order (default: 5)")
+                        default=5, help="Filter order, --legacy/-d/-x only (default: 5)")
     parser.add_argument("-c", "--filter-cutoff", type=float,
-                        default=0.5, help="Filter cutoff (default: 0.5)")
+                        default=0.5, help="Filter cutoff, --legacy/-d/-x only (default: 0.5)")
     parser.add_argument("-o", "--output-file", default="yasim.xml",
                         help="Output XML file (default: yasim.xml)")
     parser.add_argument(
@@ -568,7 +613,34 @@ if __name__ == "__main__":
         action="store_true",
         help="Rotate the model 45 degrees around the x-axis before processing")
 
+    parser.add_argument(
+        "-t", "--tolerance", type=float, default=0.01,
+        help="Adaptive fit: target RMS error as a fraction of local radius "
+             "(default: 0.01). Lower = tighter and more pipes; 0 = always use --sections")
+    parser.add_argument(
+        "-b", "--bias", type=float, default=0.0,
+        help="Adaptive fit: -1..1. 0 balances over- and under-fit (volume neutral); "
+             ">0 favours pipes that contain the model, <0 pipes inside it")
+    parser.add_argument(
+        "--fit", choices=pipefit.FIT_MODES, default="area",
+        help="Adaptive fit: what each round pipe matches. area (default) preserves "
+             "cross-section area, perimeter the wetted outline, enclosing the "
+             "smallest circle around it")
+    parser.add_argument(
+        "--legacy", action="store_true",
+        help="Use the original fixed-section Bessel pipeline (implied by -d/-x)")
+
     args = parser.parse_args()
+
+    if not (args.legacy or args.dual_axis_mode or args.diagonal_axis_mode):
+        main_adaptive(
+            args.input_file,
+            args.output_file,
+            max_sections=args.sections,
+            tolerance=args.tolerance,
+            bias=args.bias,
+            fit=args.fit)
+        raise SystemExit
 
     main(
         args.input_file,
