@@ -379,7 +379,8 @@ def mesh_to_arrays(mesh):
     return np.asarray(surf.points, dtype=np.float64), surf.faces.reshape(-1, 4)[:, 1:]
 
 
-def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit):
+def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit,
+                  lobes='1'):
     """Fit the fewest pipes that follow the model within tolerance."""
     try:
         mesh = load_fuselage_model(file_path)
@@ -394,16 +395,26 @@ def main_adaptive(file_path, output_file, max_sections, tolerance, bias, fit):
         points, tris = mesh_to_arrays(mesh)
         profile = pipefit.sample_profile(
             points, tris, n_stations=max(480, 8 * max_sections))
-        chain = pipefit.fit_chain(
-            profile.x, profile.channels(fit), kmax=max_sections,
-            tol=tolerance, bias=bias).extended(*profile.x_range)
+        if lobes == '1':
+            chain = pipefit.fit_chain(
+                profile.x, profile.channels(fit), kmax=max_sections,
+                tol=tolerance, bias=bias)
+        elif lobes == 'auto':
+            chain = pipefit.fit_auto(
+                profile, kmax=max_sections, tol=tolerance, bias=bias)
+        else:
+            chain = pipefit.fit_lobes(
+                profile, int(lobes), kmax=max_sections, tol=tolerance, bias=bias)
+        chain = chain.extended(*profile.x_range)
     except ValueError as ve:
         print(f"Error: {ve}")
         return
 
     sections_info = pipefit.chain_to_sections(chain)
     quality = pipefit.evaluate_sections(profile, sections_info)
-    print(f"Fitted {chain.n_segments} pipes (limit {max_sections}), "
+    print(f"Fitted {len(sections_info)} pipes "
+          f"({chain.n_segments} sections x up to {chain.n_lobes} lobes, "
+          f"section limit {max_sections}), "
           f"RMS error {chain.rms * 100:.2f}% of local radius.")
     print(f"Versus the model: {quality['under'] * 100:.1f}% under-fit, "
           f"{quality['over'] * 100:.1f}% over-fit, "
@@ -627,10 +638,18 @@ if __name__ == "__main__":
              "cross-section area, perimeter the wetted outline, enclosing the "
              "smallest circle around it")
     parser.add_argument(
+        "--lobes", default="1",
+        help="Adaptive fit: pipes per cross-section. 1 (default) is one round pipe; "
+             "N spreads N overlapping pipes across the wider direction for "
+             "non-round sections; auto picks N while each extra lobe adds "
+             "overlap. Lobes are pruned wherever they would duplicate a neighbour")
+    parser.add_argument(
         "--legacy", action="store_true",
         help="Use the original fixed-section Bessel pipeline (implied by -d/-x)")
 
     args = parser.parse_args()
+    if args.lobes != "auto" and not (args.lobes.isdigit() and int(args.lobes) >= 1):
+        parser.error("--lobes must be a positive integer or 'auto'")
 
     if not (args.legacy or args.dual_axis_mode or args.diagonal_axis_mode):
         main_adaptive(
@@ -639,7 +658,8 @@ if __name__ == "__main__":
             max_sections=args.sections,
             tolerance=args.tolerance,
             bias=args.bias,
-            fit=args.fit)
+            fit=args.fit,
+            lobes=args.lobes)
         raise SystemExit
 
     main(

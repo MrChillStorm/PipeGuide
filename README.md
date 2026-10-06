@@ -56,6 +56,7 @@ python3 pipeguide.py [input_file] [options]
 - `-t`, `--tolerance`: Adaptive fit target, RMS error as a fraction of local radius (default: 0.01). Lower is tighter and uses more pipes; `0` always uses `--sections`.
 - `-b`, `--bias`: Adaptive fit, from -1 to 1 (default: 0). `0` balances over- and under-fit so total volume matches the model; positive favours pipes that contain the model, negative pipes that sit inside it.
 - `--fit`: What each round pipe matches: `area` (default, preserves cross-section area, which is what drives frontal drag), `perimeter`, or `enclosing` (smallest circle around the section).
+- `--lobes`: Pipes per cross-section. `1` (default) is a single round pipe. `N` spreads N overlapping pipes across the wider direction, and `auto` adds lobes while each one improves overlap by at least 1%. See Multi-Lobe Fitting below.
 - `--legacy`: Use the original fixed-section Bessel pipeline. Implied by `-d` and `-x`.
 - `-f`, `--filter-order`: Order of the Bessel filter (`--legacy`, `-d`, `-x` only).
 - `-c`, `--filter-cutoff`: Cutoff frequency for the Bessel filter (`--legacy`, `-d`, `-x` only).
@@ -72,7 +73,15 @@ By default PipeGuide slices the mesh at hundreds of stations, reduces each slice
 3. **Pipe count** is the smallest that meets `--tolerance`, and never demands accuracy below the mesh's own noise level.
 4. **Reported quality**: the run prints how much of the model is under-covered, how much empty volume the pipes claim, and the overlap.
 
-A single round pipe cannot represent a strongly non-round section (a wide, flat fuselage), and no choice of pipes changes that; the printed under/over-fit shows when you are at that limit. For such models, `-d` and `-x` still produce overlapping multi-pipe layouts. Overlapping pipes add up their drag in YASim, so check the result against your flight model.
+A single round pipe cannot represent a strongly non-round section (a wide, flat fuselage), and no choice of pipes changes that; the printed under/over-fit shows when you are at that limit. Use `--lobes` for those models.
+
+### Multi-Lobe Fitting
+
+With `--lobes N` (or `auto`), each cross-section becomes a row of N equal round pipes spread across the wider direction (sideways for a wide body, vertically for a tall one). Radius and spacing are chosen to minimise the mismatch with the real outline. Pipes are pruned wherever a lobe would just duplicate its neighbour, so round parts of the body stay a single pipe.
+
+On a synthetic wide, flat body, overlap with the model rose from 51% (one pipe) to 89% (3 lobes, 24 pipes) and 93% (4 lobes, 28 pipes).
+
+**Flight-model caveat:** lobes overlap. If your FDM counts drag, mass or lift per pipe, overlapping pipes are counted more than once, while the single-pipe default preserves cross-section area. Compare a `--lobes 1` and a `--lobes N` run in your flight model before relying on it.
 
 Run the tests with `pip install pytest` and `python3 -m pytest tests`.
 

@@ -106,3 +106,46 @@ def test_evaluator_scores_perfect_pipe_perfectly():
 def test_empty_mesh_is_a_clean_error():
     with pytest.raises(ValueError):
         pipefit.sample_profile(np.zeros((3, 3)), np.array([[0, 1, 2]]))
+
+
+def lobe_eval(kind, n, noise=0.002):
+    pts, tris = synthetic.BODIES[kind](noise=noise)
+    prof = pipefit.sample_profile(pts, tris)
+    chain = pipefit.fit_lobes(prof, n).extended(*prof.x_range)
+    secs = pipefit.chain_to_sections(chain)
+    return pipefit.evaluate_sections(prof, secs), chain, secs
+
+
+def test_lobes_capture_non_round_sections():
+    ev, _, _ = lobe_eval("flat_belly", 3)
+    assert ev["iou"] > 0.85          # a single round pipe is stuck at ~51%
+    assert ev["under"] < 0.1 and ev["over"] < 0.1
+
+
+def test_more_lobes_fit_better():
+    ious = [lobe_eval("flat_belly", n)[0]["iou"] for n in (1, 3, 4)]
+    assert ious == sorted(ious)
+
+
+def test_lobes_are_pruned_on_round_bodies():
+    _, _, secs = lobe_eval("liner", 3)
+    assert len(secs) <= 8            # redundant lobes must not multiply pipes
+
+
+def test_lobe_pipe_count_stays_bounded():
+    _, chain, secs = lobe_eval("flat_belly", 3)
+    assert len(secs) <= 3 * chain.n_segments
+
+
+def test_auto_adds_lobes_only_when_they_help():
+    pts, tris = synthetic.liner(noise=0.002)
+    prof = pipefit.sample_profile(pts, tris)
+    assert pipefit.fit_auto(prof).n_lobes == 1
+    pts, tris = synthetic.flat_belly(noise=0.002)
+    prof = pipefit.sample_profile(pts, tris)
+    assert pipefit.fit_auto(prof).n_lobes >= 3
+
+
+def test_lobe_row_runs_across_the_wide_direction():
+    pts, tris = synthetic.flat_belly()
+    assert pipefit.lobe_axis(pipefit.sample_profile(pts, tris)) == "y"

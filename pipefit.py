@@ -245,6 +245,9 @@ class Chain:
     r: np.ndarray
     rms: float       # relative RMS error against the dense profile
     p99_err: float   # relative error not exceeded at 99% of stations
+    d: np.ndarray = None   # lobe spacing per knot (multi-lobe fits only)
+    n_lobes: int = 1
+    axis: str = "y"        # direction the lobes are spread along
 
     @property
     def n_segments(self):
@@ -254,7 +257,8 @@ class Chain:
         """Move the end knots out to the mesh extremes (values unchanged)."""
         x = self.x.copy()
         x[0], x[-1] = min(x[0], xmin), max(x[-1], xmax)
-        return Chain(x, self.cy, self.cz, self.r, self.rms, self.p99_err)
+        return Chain(x, self.cy, self.cz, self.r, self.rms, self.p99_err,
+                     self.d, self.n_lobes, self.axis)
 
     def at(self, xq):
         """(cy, cz, r) interpolated at positions xq."""
@@ -346,7 +350,7 @@ def _refit(x, F, ws, t, tau, robust=True, iters=8):
     B = _hat_basis(x, t)
     V = np.zeros((len(t), F.shape[1]))
     for c in range(F.shape[1]):
-        asym = abs(tau - 0.5) > 1e-9 and c == F.shape[1] - 1
+        asym = abs(tau - 0.5) > 1e-9 and c == 2
         w = ws.copy()
         for _ in range(iters if (robust or asym) else 1):
             V[:, c] = _solve_knots(B, F[:, c], w)
@@ -434,7 +438,8 @@ def fit_chain(x, F, kmax=63, tol=0.01, bias=0.0, center_weight=0.5,
     # 1/scale^2 so that sqrt(ws)*error is a dimensionless relative error.
     ws = 1.0 / np.maximum(F[:, 2], min_radius_frac * rmax) ** 2
 
-    cw = np.array([center_weight, center_weight, 1.0]) ** 0.5
+    cw = np.sqrt(np.r_[center_weight, center_weight, 1.0,
+                       [center_weight] * (F.shape[1] - 3)])
     Fs = (F - F.mean(0)) * cw          # scaled + centred for numerics
     Fm = F.mean(0)
     u = (x - x[0]) / (x[-1] - x[0])
@@ -452,8 +457,10 @@ def fit_chain(x, F, kmax=63, tol=0.01, bias=0.0, center_weight=0.5,
             t, V = _polish_knots(x, Fl * cw, ws, t, V)
         V = _refit(x, Fl * cw, ws, t, tau, robust=True)
         rms, p99 = _errors(x, Fl * cw, ws, t, V)
+        d = (np.maximum(V[:, 3] / cw[3] + Fm[3], 0.0)
+             if F.shape[1] > 3 else None)
         return Chain(t, V[:, 0] / cw[0] + Fm[0], V[:, 1] / cw[1] + Fm[1],
-                     np.maximum(V[:, 2] / cw[2] + Fm[2], 0.0), rms, p99)
+                     np.maximum(V[:, 2] / cw[2] + Fm[2], 0.0), rms, p99, d)
 
     if tol <= 0:
         return build(kmax)
@@ -486,24 +493,154 @@ def fit_chain(x, F, kmax=63, tol=0.01, bias=0.0, center_weight=0.5,
 
 
 # --------------------------------------------------------------------------
+# 2b. Multi-lobe sections (opt-in)
+# --------------------------------------------------------------------------
+
+def _lobe_offsets(n):
+    """Lobe centre multipliers of the spacing d, e.g. n=3 -> -1, 0, +1."""
+    return [k - (n - 1) / 2.0 for k in range(n)]
+
+
+def lobe_axis(profile):
+    """Spread lobes across the wider direction of the body ('y' or 'z')."""
+    w = h = 0.0
+    for poly, a in zip(profile.polys, profile.area):
+        if poly is not None:
+            w += a * np.ptp(poly[:, 0])
+            h += a * np.ptp(poly[:, 1])
+    return "y" if w >= h else "z"
+
+
+def _union_radial(theta, rho, d, offsets, axis):
+    """Radial function of a row of equal discs, seen from the row's centre."""
+    proj = np.cos(theta) if axis == "y" else np.sin(theta)
+    out = np.zeros(np.broadcast(rho, d, proj).shape)
+    for m in offsets:
+        o = m * d
+        p = o * proj
+        q = rho * rho - o * o + p * p
+        t = np.where(q >= 0, p + np.sqrt(np.maximum(q, 0)), 0.0)
+        out = np.maximum(out, t)
+    return out
+
+
+def lobe_channels(profile, n, axis, idx, n_theta=128, grid=22, passes=3):
+    """Per-station [cy, cz, radius, spacing] of the best n-lobe round row.
+
+    Minimises the symmetric difference with the true outline (exact for
+    star-shaped outlines, via their radial function) with a zooming grid
+    search over lobe radius and spacing.
+    """
+    theta = np.linspace(-pi, pi, n_theta, endpoint=False)
+    dth = 2 * pi / n_theta
+    offsets = _lobe_offsets(n)
+    base = profile.channels("area")
+    out = np.zeros((len(idx), 4))
+    for row, i in enumerate(idx):
+        out[row, :3] = base[i]
+        poly = profile.polys[i]
+        if poly is None or n == 1:
+            continue
+        c = profile.centroid[i]
+        v = poly - c
+        ang = np.arctan2(v[:, 1], v[:, 0])
+        o = np.argsort(ang)
+        rho_true = np.interp(theta, ang[o], np.hypot(v[o, 0], v[o, 1]), period=2 * pi)
+        r0 = max(base[i, 2], 1e-9)
+        # Outline half-extents along / across the lobe row. Matching them
+        # breaks the near-degenerate trade-off between radius and spacing
+        # (a slightly bigger, closer row looks almost identical), which would
+        # otherwise make the estimate wander and cost needless pipes.
+        ax_i = 0 if axis == "y" else 1
+        ext_major = max(abs(v[:, ax_i].min()), abs(v[:, ax_i].max()))
+        ext_minor = max(abs(v[:, 1 - ax_i].min()), abs(v[:, 1 - ax_i].max()))
+        r_lo, r_hi, d_lo, d_hi = 0.25 * r0, 1.3 * r0, 0.0, 2.5 * r0
+        for _ in range(passes):
+            R = np.linspace(r_lo, r_hi, grid)[:, None, None]
+            Dg = np.linspace(d_lo, d_hi, grid)[None, :, None]
+            U = _union_radial(theta[None, None, :], R, Dg, offsets, axis)
+            sd = (np.abs(rho_true ** 2 - U ** 2)).sum(-1) * dth / 2
+            ext_u = (n - 1) / 2.0 * Dg[..., 0] + R[..., 0]
+            sd = sd + 0.25 * r0 * (np.abs(ext_u - ext_major)
+                                   + np.abs(R[..., 0] - ext_minor))
+            a, b = np.unravel_index(np.argmin(sd), sd.shape)
+            rs = np.linspace(r_lo, r_hi, grid)
+            ds = np.linspace(d_lo, d_hi, grid)
+            rstep, dstep = rs[1] - rs[0], ds[1] - ds[0]
+            r_best, d_best = rs[a], ds[b]
+            r_lo, r_hi = max(r_best - 2 * rstep, 1e-9), r_best + 2 * rstep
+            d_lo, d_hi = max(d_best - 2 * dstep, 0.0), d_best + 2 * dstep
+        out[row, 2], out[row, 3] = r_best, d_best
+    return out
+
+
+def fit_lobes(profile, n, axis=None, tol=0.01, kmax=63, bias=0.0, stride=2):
+    """Fit a chain of n-lobe rows; returns a Chain with spacing ``d``."""
+    axis = axis or lobe_axis(profile)
+    idx = np.arange(0, len(profile.x), stride)
+    F = lobe_channels(profile, n, axis, idx)
+    ch = fit_chain(profile.x[idx], F, kmax=kmax, tol=tol, bias=bias)
+    ch.n_lobes, ch.axis = n, axis
+    return ch
+
+
+def fit_auto(profile, max_lobes=4, min_gain=0.01, **kw):
+    """Add lobes only while each extra one buys at least ``min_gain`` overlap."""
+    best = fit_chain(profile.x, profile.channels("area"), **kw)
+    best_ev = evaluate_sections(profile, chain_to_sections(best.extended(*profile.x_range)))
+    for n in range(2, max_lobes + 1):
+        cand = fit_lobes(profile, n, **kw)
+        ev = evaluate_sections(profile, chain_to_sections(cand.extended(*profile.x_range)))
+        if ev["iou"] - best_ev["iou"] < min_gain:
+            break
+        best, best_ev = cand, ev
+    return best
+
+
+# --------------------------------------------------------------------------
 # 3. YASim output
 # --------------------------------------------------------------------------
 
-def chain_to_sections(chain):
+def chain_to_sections(chain, prune=0.1):
     """Chain -> YASim fuselage tuples (ax,ay,az,bx,by,bz,width,taper,midpoint).
 
     Uses PipeGuide's established axis convention (x and y negated for YASim).
     A linear cone is midpoint 1 (widest at b) or 0 (widest at a).
+
+    Multi-lobe chains emit one pipe per lobe, but a lobe is pruned wherever
+    its offset from the centre is below ``prune`` of the radius, since it
+    would just duplicate the pipe next to it.
     """
+    n = chain.n_lobes
+    d = chain.d if chain.d is not None else np.zeros_like(chain.x)
     out = []
-    for i in range(chain.n_segments):
-        ra, rb = float(chain.r[i]), float(chain.r[i + 1])
+
+    def cone(ra, rb, pa, pb):
         wide, narrow = max(ra, rb), min(ra, rb)
         taper = narrow / wide if wide > 0 else 1.0
         mid = 1.0 if ra < rb else 0.0 if ra > rb else 0.5
-        out.append((-chain.x[i], -chain.cy[i], chain.cz[i],
-                    -chain.x[i + 1], -chain.cy[i + 1], chain.cz[i + 1],
-                    2 * wide, taper, mid))
+        return (-chain.x[i], -pa[0], pa[1], -chain.x[i + 1], -pb[0], pb[1],
+                2 * wide, taper, mid)
+
+    def at(k, m):
+        off = m * d[k]
+        y = chain.cy[k] + (off if chain.axis == "y" else 0.0)
+        z = chain.cz[k] + (off if chain.axis == "z" else 0.0)
+        return (y, z)
+
+    for i in range(chain.n_segments):
+        ra, rb = float(chain.r[i]), float(chain.r[i + 1])
+        offsets = _lobe_offsets(n)
+        spread = max(d[i], d[i + 1])
+        small = spread < prune * max(ra, rb)
+        if small:
+            # Lobes coincide here: one centred pipe stands in for all of them.
+            out.append(cone(ra, rb, at(i, 0.0), at(i + 1, 0.0)))
+            continue
+        for m in offsets:
+            if m != 0 and abs(m) * spread < prune * max(ra, rb):
+                continue
+            out.append(cone(ra, rb, at(i, m), at(i + 1, m)))
     return out
 
 
